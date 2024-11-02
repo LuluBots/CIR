@@ -17,20 +17,18 @@ class LayerNorm(nn.Module):
         self.use_bias = use_bias
         
         if self.use_scale:
-            self.scale = nn.Parameter(torch.ones(1, dim))  # 调整维度
+            self.scale = nn.Parameter(torch.ones(1, dim))  
         if self.use_bias:
-            self.bias = nn.Parameter(torch.zeros(1, dim))  # 调整维度
+            self.bias = nn.Parameter(torch.zeros(1, dim))  
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         mean = x.mean(dim=-1, keepdim=True)
         var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
         normed_x = (x - mean) * (1 / torch.sqrt(var + self.epsilon))
-
-        # if self.use_scale:
-        #     normed_x = normed_x * (1 + self.scale)
-        # if self.use_bias:
-        #     normed_x = normed_x + self.bias
-
+        if self.use_scale:
+            normed_x = normed_x * (1 + self.scale)
+        if self.use_bias:
+            normed_x = normed_x + self.bias
         return normed_x
 
 
@@ -41,7 +39,6 @@ class Weight(nn.Module):
         self.hidden_dim = hidden_dim
         self.w = nn.Parameter(torch.empty(input_dim, hidden_dim))
 
-        # 使用 LeCun 正态分布初始化权重
         nn.init.normal_(self.w, mean=0, std=1.0 / (self.input_dim ** 0.5))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -66,7 +63,6 @@ class FFN(nn.Module):
         self.use_bias = use_bias
         self.use_relu = use_relu
         
-        # 初始化线性层和偏置
         self.linear = Weight(self.input_dim, self.output_dim)
         if self.use_bias:
             self.bias = Bias(self.output_dim)
@@ -76,7 +72,7 @@ class FFN(nn.Module):
         if self.use_bias:
             x = self.bias(x)
         if self.use_relu:
-            x = F.relu(x)  # 使用 PyTorch 的 ReLU 激活函数
+            x = F.relu(x)  
         return x
 
 
@@ -177,9 +173,9 @@ class AttentionProjection(nn.Module):
             assert shape[-1] == self.input_dim, f'Expecting shape[-1] == p.input_dim, {shape[-1]} != {self.input_dim}'
             batch_eqn = eqn_sym[:(rank - 1)] if rank else '...'
             eqn = f'{batch_eqn}D,DNH->{batch_eqn}NH'
-        print(f"x shape: {x.shape}")
-        print(f"w shape: {self.w.shape}")
-        print(f"Equation: {eqn}")
+        # print(f"x shape: {x.shape}") # x shape: torch.Size([50, 2, 512])    # x shape: torch.Size([50, 8, 8, 256])
+        # print(f"w shape: {self.w.shape}") # w shape: torch.Size([512, 8, 64])    # w shape: torch.Size([512, 8, 256])
+        # print(f"Equation: {eqn}")
 
         ret = torch.einsum(eqn, x, self.w)
         if self.use_bias:
@@ -193,14 +189,12 @@ class PerDimScale(nn.Module):
     def __init__(self, dim: int):
         super(PerDimScale, self).__init__()
         self.dim = dim
-        # 初始化可学习参数
         self.per_dim_scale = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         assert x.shape[-1] == self.dim
         r_softplus_0 = 1.442695041
-        # 计算缩放因子
-        scale = r_softplus_0 / (self.dim ** 0.5)  # 使用平方根
+        scale = r_softplus_0 / (self.dim ** 0.5)  
         scale *= torch.nn.functional.softplus(self.per_dim_scale)
         return x * scale
 
@@ -282,7 +276,7 @@ class Transformer(nn.Module):
         self.layer_norm = LayerNorm(dim=self.input_dim)
 
     def forward(self, x: torch.Tensor, attn_mask=None) -> Tuple[torch.Tensor, torch.Tensor]:
-        print("Hi.")
+        # print("Hi.")
         x_normalized = self.layer_norm(x)
         atten_output, atten_probs = self.self_attention(
             x_normalized,
@@ -293,7 +287,7 @@ class Transformer(nn.Module):
         if self.add_skip_connection:
             atten_output = atten_output + x
         output = self.ff_layer(atten_output)
-        print("Bye.")
+        # print("Bye.")
 
         return output, atten_probs
 
@@ -316,12 +310,11 @@ class StackedTransformer(nn.Module):
         self.add_skip_connection = add_skip_connection
         self.use_per_dim_scale = use_per_dim_scale
 
-        # Initialize the transformer layers
         self.layers = nn.ModuleList([
             Transformer(num_heads=self.num_heads,
                         input_dim=self.input_dim,
                         hidden_dim=self.hidden_dim,
-                        output_dim=self.input_dim,  # Assuming output_dim equals input_dim
+                        output_dim=self.input_dim,  
                         use_bias=self.use_bias,
                         add_skip_connection=self.add_skip_connection,
                         use_per_dim_scale=self.use_per_dim_scale)
