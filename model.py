@@ -75,9 +75,9 @@ class MagicLens(nn.Module):
         assert images.ndim >= 4
         images = images.permute(0, 3, 1, 2)  # 转换为(B, C, H, W)
         images = largest_square_crop(images)  
-        # print("images shape 1: ", images.shape)  # torch.Size([32, 3, 224, 224])
+        print("images shape 1: ", images.shape)  # torch.Size([32, 3, 224, 224])
         images = F.interpolate(images, size=(self.size, self.size), mode='bilinear', align_corners=False)
-        # print("images shape 2: ", images.shape)  # torch.Size([32, 3, 224, 224])
+        print("images shape 2: ", images.shape)  # torch.Size([32, 3, 224, 224])
         return images
 
 
@@ -99,8 +99,8 @@ class MagicLens(nn.Module):
 
         """
         assert input_batch['ids'].ndim <= 3
-        # print("input_batch['ids'] shape:", input_batch['ids'].shape) # shape: torch.Size([32, 1, 77])
-        # print("input_batch['image'] shape:", input_batch['image'].shape) # shape: torch.Size([32, 224, 224, 3])
+        print("input_batch['ids'] shape:", input_batch['ids'].shape) # shape: torch.Size([32, 1, 77])
+        print("input_batch['image'] shape:", input_batch['image'].shape) # shape: torch.Size([32, 224, 224, 3])
 
         if input_batch['ids'].ndim == 3:
             # Only takes the first caption.
@@ -111,10 +111,10 @@ class MagicLens(nn.Module):
             input_batch['ids'] = torch.tensor(input_batch['ids'], dtype=torch.long)
 
         images = self._preprocess_images(input_batch['image'])
-        # print("Processed image shape:", images.shape)  # torch.Size([B, 3, 224, 224])
+        print("Processed image shape:", images.shape)  # torch.Size([B, 3, 224, 224])
         image_embs, text_embs = self.clip(images, input_batch['ids'])
-        # print("Image embeddings shape:", image_embs.shape)  # Ensure it matches [B, D]
-        # print("Text embeddings shape:", text_embs.shape)  # Ensure it matches [B, D]
+        print("Image embeddings shape:", image_embs.shape)  # Ensure it matches [B, D]
+        print("Text embeddings shape:", text_embs.shape)  # Ensure it matches [B, D]
         return image_embs, text_embs
 
     def _normalize_embed(self, embed: torch.Tensor) -> torch.Tensor:
@@ -152,16 +152,16 @@ class MagicLens(nn.Module):
         """
 
         img_embed, txt_embed = self.clip_encode(input_batch)  # [B, D], [B, D]
-        # print("1:",img_embed.shape,txt_embed.shape)  # torch.Size([32, 512]) torch.Size([32, 512])
+        print("1:",img_embed.shape,txt_embed.shape)  # torch.Size([32, 512]) torch.Size([32, 512])
         img_embed = img_embed.view(-1, 1, img_embed.size(-1))  # [B, 1, D]
-        # print("2:",img_embed.shape)  # torch.Size([32, 1, 512])
+        print("2:",img_embed.shape)  # torch.Size([32, 1, 512])
         txt_embed = txt_embed.view(-1, 1, txt_embed.size(-1))  # [B, 1, D]
-        # print("3:",txt_embed.shape)  # torch.Size([32, 1, 512])
+        print("3:",txt_embed.shape)  # torch.Size([32, 1, 512])
 
         concate_mm_embed = torch.cat([img_embed, txt_embed], dim=1)
-        # print("4:",concate_mm_embed.shape) # torch.Size([32, 2, 512])
+        print("4:",concate_mm_embed.shape) # torch.Size([32, 2, 512])
         multimodal_embed = self.multimodal_encoder(concate_mm_embed)  # [B, 2, D] torch.Size([20, 2, 512])
-        # print("5:",multimodal_embed.shape)
+        print("5:",multimodal_embed.shape)
         multimodal_embed = self.contrastive_multimodal_pooler(multimodal_embed)
         multimodal_embed = multimodal_embed[:, 0]
 
