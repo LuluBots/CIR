@@ -46,7 +46,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/home/lulu/lulu/magic/magiclens/train_trials/train_2024-11-02_15:18:03/model_weights_epoch_114.pth",
+        default="model_weights_epoch_114.pth",
         help="The path to model directory.",
     )
     parser.add_argument(
