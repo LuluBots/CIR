@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
-    parser.add_argument("--dataset", type=str, default="fiq-toptee", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin"], help="Dataset selection.")
+    parser.add_argument("--dataset", type=str, default="fiq-shirt", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin"], help="Dataset selection.")
     parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs.")
     parser.add_argument("--batch_size", type=int, default=50, help="Batch size for training.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
