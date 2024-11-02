@@ -57,40 +57,63 @@ class Bias(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return x + self.b
 
-
 class FFN(nn.Module):
     """Feed-forward network."""
-    def __init__(self, input_dim: int, output_dim: int, use_bias: bool = True, use_relu: bool = True):
-        super(FFN, self).__init__()
+    def __init__(self, input_dim: int = 0, output_dim: int = 0, use_bias: bool = True, use_relu: bool = True):
+        super().__init__()
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.use_bias = use_bias
         self.use_relu = use_relu
         
-        # 定义线性层
-        self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
+        # 初始化线性层和偏置
+        self.linear = Weight(self.input_dim, self.output_dim)
+        if self.use_bias:
+            self.bias = Bias(self.output_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.linear(x)
+        if self.use_bias:
+            x = self.bias(x)
         if self.use_relu:
-            x = torch.relu(x)
+            x = F.relu(x)  # 使用 PyTorch 的 ReLU 激活函数
         return x
 
 
-class LayerNorm(nn.Module):
-    def __init__(self, dim):
-        super(LayerNorm, self).__init__()
-        self.layer_norm = nn.LayerNorm(dim)
 
-    def forward(self, x):
-        return self.layer_norm(x)
+# class FFN(nn.Module):
+#     """Feed-forward network."""
+#     def __init__(self, input_dim: int, output_dim: int, use_bias: bool = True, use_relu: bool = True):
+#         super(FFN, self).__init__()
+#         self.use_relu = use_relu
+        
+#         # 定义线性层
+#         self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
+
+#     def forward(self, x: torch.Tensor) -> torch.Tensor:
+#         x = self.linear(x)
+#         if self.use_relu:
+#             x = torch.relu(x)
+#         return x
 
 
-class FFN(nn.Module):
-    def __init__(self, input_dim, output_dim, use_bias=True, use_relu=True):
-        super(FFN, self).__init__()
-        self.fc = nn.Linear(input_dim, output_dim, bias=use_bias)
-        self.activation = nn.ReLU() if use_relu else nn.Identity()
+# class LayerNorm(nn.Module):
+#     def __init__(self, dim):
+#         super(LayerNorm, self).__init__()
+#         self.layer_norm = nn.LayerNorm(dim)
 
-    def forward(self, x):
-        return self.activation(self.fc(x))
+#     def forward(self, x):
+#         return self.layer_norm(x)
+
+
+# class FFN(nn.Module):
+#     def __init__(self, input_dim, output_dim, use_bias=True, use_relu=True):
+#         super(FFN, self).__init__()
+#         self.fc = nn.Linear(input_dim, output_dim, bias=use_bias)
+#         self.activation = nn.ReLU() if use_relu else nn.Identity()
+
+#     def forward(self, x):
+#         return self.activation(self.fc(x))
 
 
 class TransformerFFN(nn.Module):
