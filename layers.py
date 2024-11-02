@@ -26,10 +26,10 @@ class LayerNorm(nn.Module):
         var = ((x - mean) ** 2).mean(dim=-1, keepdim=True)
         normed_x = (x - mean) * (1 / torch.sqrt(var + self.epsilon))
 
-        if self.use_scale:
-            normed_x = normed_x * (1 + self.scale)
-        if self.use_bias:
-            normed_x = normed_x + self.bias
+        # if self.use_scale:
+        #     normed_x = normed_x * (1 + self.scale)
+        # if self.use_bias:
+        #     normed_x = normed_x + self.bias
 
         return normed_x
 
@@ -177,9 +177,9 @@ class AttentionProjection(nn.Module):
             assert shape[-1] == self.input_dim, f'Expecting shape[-1] == p.input_dim, {shape[-1]} != {self.input_dim}'
             batch_eqn = eqn_sym[:(rank - 1)] if rank else '...'
             eqn = f'{batch_eqn}D,DNH->{batch_eqn}NH'
-        # print(f"x shape: {x.shape}")
-        # print(f"w shape: {self.w.shape}")
-        # print(f"Equation: {eqn}")
+        print(f"x shape: {x.shape}")
+        print(f"w shape: {self.w.shape}")
+        print(f"Equation: {eqn}")
 
         ret = torch.einsum(eqn, x, self.w)
         if self.use_bias:
@@ -282,7 +282,7 @@ class Transformer(nn.Module):
         self.layer_norm = LayerNorm(dim=self.input_dim)
 
     def forward(self, x: torch.Tensor, attn_mask=None) -> Tuple[torch.Tensor, torch.Tensor]:
-        # print("Hi.")
+        print("Hi.")
         x_normalized = self.layer_norm(x)
         atten_output, atten_probs = self.self_attention(
             x_normalized,
@@ -293,7 +293,7 @@ class Transformer(nn.Module):
         if self.add_skip_connection:
             atten_output = atten_output + x
         output = self.ff_layer(atten_output)
-        # print("Bye.")
+        print("Bye.")
 
         return output, atten_probs
 
