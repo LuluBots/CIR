@@ -76,42 +76,6 @@ class FFN(nn.Module):
         return x
 
 
-
-# class FFN(nn.Module):
-#     """Feed-forward network."""
-#     def __init__(self, input_dim: int, output_dim: int, use_bias: bool = True, use_relu: bool = True):
-#         super(FFN, self).__init__()
-#         self.use_relu = use_relu
-        
-#         # 定义线性层
-#         self.linear = nn.Linear(input_dim, output_dim, bias=use_bias)
-
-#     def forward(self, x: torch.Tensor) -> torch.Tensor:
-#         x = self.linear(x)
-#         if self.use_relu:
-#             x = torch.relu(x)
-#         return x
-
-
-# class LayerNorm(nn.Module):
-#     def __init__(self, dim):
-#         super(LayerNorm, self).__init__()
-#         self.layer_norm = nn.LayerNorm(dim)
-
-#     def forward(self, x):
-#         return self.layer_norm(x)
-
-
-# class FFN(nn.Module):
-#     def __init__(self, input_dim, output_dim, use_bias=True, use_relu=True):
-#         super(FFN, self).__init__()
-#         self.fc = nn.Linear(input_dim, output_dim, bias=use_bias)
-#         self.activation = nn.ReLU() if use_relu else nn.Identity()
-
-#     def forward(self, x):
-#         return self.activation(self.fc(x))
-
-
 class TransformerFFN(nn.Module):
     def __init__(self, input_dim, output_dim=0, hidden_dim=0, use_bias=True, add_skip_connection=True):
         super(TransformerFFN, self).__init__()
