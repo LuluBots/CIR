@@ -1,43 +1,36 @@
-# Copyright 2024 DeepMind Technologies Limited
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# you may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
-import os
-import pickle
+from tqdm import tqdm
 import torch
-import numpy as np
-
-import torch.nn.functional as F
+import os
+import json
 from argparse import ArgumentParser
 from data_utils import build_circo_dataset, build_fiq_dataset
 from model import MagicLens
-from tqdm import tqdm
 import CLIP.clip as clip
 
-def load_model(model_size: str) -> tuple:
-    # init model
-    model = MagicLens(model_size)
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # device = ("cpu")
-    model.to(device).float()
-    model.eval()  # Set model to evaluation mode
-    # load model
+# def load_model(model_size: str) -> torch.nn.Module:
+#     model = MagicLens(model_size)
+#     model.eval()
+#     model.load_state_dict(torch.load(args.model_path, weights_only=True))
+#     print("Model loaded")
+#     return model
 
-    # state_dict = torch.load('/home/lulu/lulu/magic/magiclens/me_magic_lens_clip_base_114.pkl', map_location='cpu', weights_only=False)
-    # model.load_state_dict(state_dict)
-    model.load_state_dict(torch.load(args.model_path, weights_only=True))
-    print("model loaded")
+def load_model(model_size: str) -> torch.nn.Module:
+    model = MagicLens(model_size)
+    model.eval()
+    
+    # 加载模型权重
+    state_dict = torch.load(args.model_path, weights_only=True)
+
+    # 移除前缀 'module.'
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        new_key = k.replace('module.', '')  # 去掉 'module.' 前缀
+        new_state_dict[new_key] = v
+
+    # 加载新的 state_dict
+    model.load_state_dict(new_state_dict)
+    
+    print("Model loaded")
     return model
 
 if __name__ == "__main__":
@@ -45,7 +38,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/home/lulu/lulu/magic/magiclens/train_2024-11-03_03:43:49/model_weights_epoch_14.pth",
+        default="/home/lulu/lulu/magic/magiclens/train_2024-11-03_21:16:21/model_weights_epoch_38.pth",
         help="The path to model directory.",
     )
     parser.add_argument(
@@ -69,80 +62,81 @@ if __name__ == "__main__":
         help="Output directory of predictions top 50.",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=50, help="Batch size for inference."
+        "--batch_size", type=int, default=100, help="Batch size for inference."
     )
     args = parser.parse_args()
 
-    # load model
+    # Load model
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
     model = load_model(args.model_size)
 
+    # Use multiple GPUs
+    if torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
 
-    # load data
+    # Load data
     if args.dataset.startswith("fiq"):
-        subtask = args.dataset.split("-")[1]
         eval_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["circo"]:
         eval_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     else:
         raise NotImplementedError
     
-    
-    # inference index:
-    index_embeddings = []
-    print("Inference index...")
-    num_index_batches = int((len(eval_dataset.index_examples) - 4500) / args.batch_size) + 1
-    for i in tqdm(range(num_index_batches)):
-        batch = eval_dataset.index_examples[i * args.batch_size: (i + 1) * args.batch_size]
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        # device = torch.device("cpu")
-        iids = [i.iid for i in batch]
-        iimages = torch.stack([torch.from_numpy(i.iimage) for i in batch], dim=0).to(device)
-        itokens = torch.stack([torch.from_numpy(i.itokens) for i in batch], dim=0).to(device)
-        iembeds = model({"ids": itokens, "image": iimages})["multimodal_embed_norm"]
-        # print(f"Shape of iembeds for batch {i}: {iembeds.shape}") # Shape of iembeds for batch 35: torch.Size([50, 512])
-        index_embeddings.append(iembeds) 
-    index_embeddings = torch.cat(index_embeddings, dim=0) 
-    # print(f"Shape of index_embeddings: {index_embeddings.shape}") # Shape of index_embeddings: torch.Size([1850, 512]) 1850 = number of batch * batch size
- 
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device).float()
+    results = {}
 
-    
     print("Inference queries...")
-    num_query_batches = int((len(eval_dataset.query_examples) - 1000)/ args.batch_size) + 1
+    num_query_batches = int(len(eval_dataset.query_examples) / args.batch_size) + 1
+    top_k = 50  # number of top similar items to retrieve
+    
     for i in tqdm(range(num_query_batches)):
-        batch = eval_dataset.query_examples[i * args.batch_size: (i + 1) * args.batch_size]
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        # device = torch.device("cpu")
-        qiids = [q.qid for q in batch]
-        qimages = torch.stack([torch.from_numpy(q.qimage) for q in batch], dim=0).to(device)
-        qtokens = torch.stack([q.qtokens for q in batch], dim=0).to(device)
-        qembeds = model({"ids": qtokens, "image": qimages})["multimodal_embed_norm"] 
-        # print("qembeds shape: ", qembeds.shape)  # qembeds shape:  torch.Size([50, 512])
-        similarity_scores = torch.matmul(qembeds, index_embeddings.T)
+        query_batch = eval_dataset.query_examples[i * args.batch_size: (i + 1) * args.batch_size]
+        qimages = torch.stack([torch.from_numpy(q.qimage) for q in query_batch], dim=0).to(device)
+        qtokens = torch.stack([q.qtokens for q in query_batch], dim=0).to(device)
+        qembeds = model({"ids": qtokens, "image": qimages})["multimodal_embed_norm"]
 
-        # get top 50 by similarity
-        top_k_indices = torch.topk(similarity_scores, k=50, dim=1).indices
-        top_k_iids = [[eval_dataset.index_examples[idx].iid for idx in top_k] for top_k in top_k_indices]
+        batch_top_k_iids = []
+        batch_top_k_scores = []
+        num_index_batches = int(len(eval_dataset.index_examples) / args.batch_size)
 
-        # gather scores for the top_k
-        top_k_scores = [similarity_scores[i, tk].tolist() for i, tk in enumerate(top_k_indices)]
-        # with open('output_t.txt', 'w') as f:
-        #     f.write(f"Top K Indices: {top_k_indices.tolist()}\n")
-        #     f.write(f"Top K IIDs: {top_k_iids}\n")
-        #     f.write(f"Top K Scores: {top_k_scores}\n")
-        
-        # update the query_example with the retrieved results
-        for k, q_example in enumerate(batch):
-            q_example.retrieved_iids = top_k_iids[k]
-            q_example.retrieved_scores = top_k_scores[k]
-            eval_dataset.query_examples[i + k] = q_example
-        with open('output_q_shirt.txt', 'a') as f:
-            for k, q_example in enumerate(batch):
-                f.write(f"Query Example {k}:\n")
-                f.write(f"Retrieved IIDs: {top_k_iids[k]}\n")
-                f.write(f"Retrieved Scores: {top_k_scores[k]}\n")
-                f.write("\n")  # 添加一个换行以便于可读性
-    # Post-processing and evaluation:
+        for j in tqdm(range(num_index_batches)):
+            index_batch = eval_dataset.index_examples[j * args.batch_size: (j + 1) * args.batch_size]
+            iimages = torch.stack([torch.from_numpy(i.iimage) for i in index_batch], dim=0).to(device)
+            itokens = torch.stack([torch.from_numpy(i.itokens) for i in index_batch], dim=0).to(device)
+            iembeds = model({"ids": itokens, "image": iimages})["multimodal_embed_norm"]
+
+            similarity_scores = torch.nn.functional.cosine_similarity(qembeds.unsqueeze(1), iembeds.unsqueeze(0), dim=2)
+
+            for q_idx in range(similarity_scores.size(0)):
+                top_k_indices_in_batch = torch.topk(similarity_scores[q_idx], k=1).indices
+                top_k_scores_in_batch = similarity_scores[q_idx][top_k_indices_in_batch].tolist()
+                top_k_iids_in_batch = [index_batch[idx].iid for idx in top_k_indices_in_batch]
+
+                if len(batch_top_k_iids) <= q_idx:
+                    batch_top_k_iids.append(top_k_iids_in_batch)
+                    batch_top_k_scores.append(top_k_scores_in_batch)
+                else:
+                    combined_iids = batch_top_k_iids[q_idx] + top_k_iids_in_batch
+                    combined_scores = batch_top_k_scores[q_idx] + top_k_scores_in_batch
+                    sorted_indices = sorted(range(len(combined_scores)), key=lambda x: combined_scores[x], reverse=True)[:top_k]
+                    batch_top_k_iids[q_idx] = [combined_iids[idx] for idx in sorted_indices]
+                    batch_top_k_scores[q_idx] = [combined_scores[idx] for idx in sorted_indices]
+
+        for k, q_example in enumerate(query_batch):
+            q_example.retrieved_iids = batch_top_k_iids[k]
+            q_example.retrieved_scores = batch_top_k_scores[k]
+            eval_dataset.query_examples[i * args.batch_size + k] = q_example
+
+            results[q_example.qid] = {
+                "retrieved_iids": batch_top_k_iids[k],
+                "retrieved_scores": batch_top_k_scores[k]
+            }
+
+    with open("retrieval_results.json", "w") as f:
+        json.dump(results, f, indent=4)
+
     if args.dataset in ["fiq-dress", "fiq-shirt", "fiq-toptee"]:
         eval_dataset.evaluate_recall()
     elif args.dataset in ["circo"]:
