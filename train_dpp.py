@@ -13,7 +13,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import CLIP.clip as clip
 from CLIP.clip import tokenize
 from model import MagicLens
-from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train
+from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train, build_happy_dataset, build_happy_dataset_for_train
 torch.cuda.empty_cache()
 
 
@@ -170,8 +170,8 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
-    parser.add_argument("--dataset", type=str, default="fiq-shirt", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin"], help="Dataset selection.")
-    parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
+    parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
     parser.add_argument("--batch_size", type=int, default=100, help="Batch size for training.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--rank", type=int, default=0, help="Rank of the process.")  # 添加 rank 参数
@@ -199,6 +199,9 @@ if __name__ == "__main__":
     elif args.dataset in ["circo"]:
         train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
         val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+    elif args.dataset in ["happy"]:
+        train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
+        val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
 
     else:
         raise NotImplementedError
