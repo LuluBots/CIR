@@ -8,8 +8,8 @@ from tqdm import tqdm
 import torch
 import numpy as np
 from PIL import Image
-from clip import tokenize
-from clip.simple_tokenizer import SimpleTokenizer
+from CLIP.clip import tokenize
+from CLIP.clip.simple_tokenizer import SimpleTokenizer
 
 @dataclass
 class QueryExample:
