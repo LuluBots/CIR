@@ -1,3 +1,4 @@
+import torch.nn as nn
 import os
 import sys
 import time
@@ -14,6 +15,7 @@ from CLIP.clip import tokenize
 from model import MagicLens
 from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train
 torch.cuda.empty_cache()
+
 
 def contrastive_loss(query_embeddings, target_embeddings, temperature=0.07):
     similarities = F.cosine_similarity(query_embeddings.unsqueeze(1), target_embeddings.unsqueeze(0), dim=2)
@@ -88,7 +90,8 @@ def prepare_batch(batch, device, dataset):
     return qimages, qtokens, timages, ttokens
 
 def validate_model(model, val_dataset, criterion, args):
-    model.to(device).float()
+    # model.to(device).float()
+    model.float()
     model.eval()
     total_loss = 0.0
     num_batches = int(len(val_dataset.query_examples) / args.batch_size)
@@ -112,33 +115,34 @@ def validate_model(model, val_dataset, criterion, args):
     return avg_loss
 
 def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
-    model.to(device).float()
-    scaler = torch.amp.GradScaler()  
-    model.train()
-    best_val_loss = float('inf')  
+    model.train().float()
+    best_val_loss = float('inf')
 
     for epoch in range(args.epochs):
         total_loss = 0.0
-        num_batches = int(len(train_dataset.query_examples) / args.batch_size)
+        num_batches = len(train_dataset.query_examples) // args.batch_size
 
         for batch_idx in tqdm(range(num_batches), desc=f"Training Epoch {epoch + 1}/{args.epochs}"):
             optimizer.zero_grad()
-            
+
             batch = train_dataset.query_examples[batch_idx * args.batch_size: (batch_idx + 1) * args.batch_size]
             qimages, qtokens, timages, ttokens = prepare_batch(batch, device, train_dataset)
 
-            with torch.amp.autocast('cuda'):
-                qoutput = model({"ids": qtokens, "image": qimages})
-                query_embeddings = qoutput["multimodal_embed_norm"]
+            # 将数据移到 GPU
+            qimages = qimages.to(device)
+            qtokens = qtokens.to(device)
+            timages = timages.to(device)
+            ttokens = ttokens.to(device)
 
-                toutput = model({"ids": ttokens, "image": timages})
-                target_embeddings = toutput["multimodal_embed_norm"]
+            qoutput = model({"ids": qtokens, "image": qimages})
+            query_embeddings = qoutput["multimodal_embed_norm"]
 
-                loss = criterion(query_embeddings, target_embeddings)
+            toutput = model({"ids": ttokens, "image": timages})
+            target_embeddings = toutput["multimodal_embed_norm"]
 
-            scaler.scale(loss).backward()  
-            scaler.step(optimizer) 
-            scaler.update()  
+            loss = criterion(query_embeddings, target_embeddings)
+            loss.backward()
+            optimizer.step()
 
             total_loss += loss.item()
 
@@ -146,19 +150,16 @@ def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
         print(f"Epoch [{epoch + 1}/{args.epochs}], Training Loss: {avg_loss:.4f}")
 
         val_loss = validate_model(model, val_dataset, criterion, args)
-        # scheduler.step(val_loss)
-        # for param_group in optimizer.param_groups:
-        #     print("Current learning rate:", param_group['lr'])
+        if args.rank == 0:
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
+                print(f"Best model weights saved for epoch {epoch + 1}.")
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
-            print(f"Best model weights saved for epoch {epoch + 1}.")
-
-        torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
-
+            torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
 
 if __name__ == "__main__":
+
     timestamp = int(time.time())
     timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d_%H:%M:%S')
     output_dir = f"train_{timestamp}"
@@ -170,13 +171,22 @@ if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
     parser.add_argument("--dataset", type=str, default="fiq-shirt", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin"], help="Dataset selection.")
-    parser.add_argument("--epochs", type=int, default=200, help="Number of training epochs.")
-    parser.add_argument("--batch_size", type=int, default=50, help="Batch size for training.")
+    parser.add_argument("--epochs", type=int, default=1, help="Number of training epochs.")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for training.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
-    
+    parser.add_argument("--rank", type=int, default=0, help="Rank of the process.")  # 添加 rank 参数
+
     args = parser.parse_args()
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = MagicLens(args.model_size).to(device)
+    # 初始化模型和数据
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MagicLens(args.model_size).to(device)
+
+    # 使用 DataParallel 包装模型
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
+    
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.8)
