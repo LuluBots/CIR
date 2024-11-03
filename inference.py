@@ -23,14 +23,13 @@ from argparse import ArgumentParser
 from data_utils import build_circo_dataset, build_fiq_dataset
 from model import MagicLens
 from tqdm import tqdm
-import clip
-from clip import tokenize
+import CLIP.clip as clip
 
 def load_model(model_size: str) -> tuple:
     # init model
     model = MagicLens(model_size)
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    device = ("cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    # device = ("cpu")
     model.to(device).float()
     model.eval()  # Set model to evaluation mode
     # load model
@@ -46,7 +45,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/home/zt/ll/magiclens/train_2024-11-02_21:11:46/best_model_weights.pth",
+        default="/home/lulu/lulu/magic/magiclens/train_2024-11-03_03:43:49/model_weights_epoch_14.pth",
         help="The path to model directory.",
     )
     parser.add_argument(
@@ -95,8 +94,8 @@ if __name__ == "__main__":
     num_index_batches = int((len(eval_dataset.index_examples) - 4500) / args.batch_size) + 1
     for i in tqdm(range(num_index_batches)):
         batch = eval_dataset.index_examples[i * args.batch_size: (i + 1) * args.batch_size]
-        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        device = torch.device("cpu")
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cpu")
         iids = [i.iid for i in batch]
         iimages = torch.stack([torch.from_numpy(i.iimage) for i in batch], dim=0).to(device)
         itokens = torch.stack([torch.from_numpy(i.itokens) for i in batch], dim=0).to(device)
@@ -112,8 +111,8 @@ if __name__ == "__main__":
     num_query_batches = int((len(eval_dataset.query_examples) - 1000)/ args.batch_size) + 1
     for i in tqdm(range(num_query_batches)):
         batch = eval_dataset.query_examples[i * args.batch_size: (i + 1) * args.batch_size]
-        # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        device = torch.device("cpu")
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        # device = torch.device("cpu")
         qiids = [q.qid for q in batch]
         qimages = torch.stack([torch.from_numpy(q.qimage) for q in batch], dim=0).to(device)
         qtokens = torch.stack([q.qtokens for q in batch], dim=0).to(device)
