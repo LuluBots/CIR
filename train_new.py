@@ -9,8 +9,8 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-import clip
-from clip import tokenize
+import CLIP.clip as clip
+from CLIP.clip import tokenize
 from model import MagicLens
 from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train
 torch.cuda.empty_cache()
@@ -89,7 +89,6 @@ def prepare_batch(batch, device, dataset):
 
 def validate_model(model, val_dataset, criterion, args):
     model.to(device).float()
-
     model.eval()
     total_loss = 0.0
     num_batches = int(len(val_dataset.query_examples) / args.batch_size)
@@ -116,8 +115,8 @@ def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
     model.to(device).float()
     scaler = torch.amp.GradScaler()  
     model.train()
-
     best_val_loss = float('inf')  
+
     for epoch in range(args.epochs):
         total_loss = 0.0
         num_batches = int(len(train_dataset.query_examples) / args.batch_size)
@@ -194,6 +193,6 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
     
-    train_model(model, train_dataset,val_dataset, optimizer, criterion, args) 
+    train_model(model, train_dataset, val_dataset, optimizer, criterion, args) 
 
     print("Training Done.")
