@@ -290,21 +290,21 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
         with open(file_name) as f:
             queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata"))
+    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
     index_image_folder = "/home/zt/data/open-images/train/data"
 
     null_tokens = tokenize("")  # used for index example
     null_tokens = np.array(null_tokens)
 
     def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, index_img_id + ".png")
+        img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
         ima = process_img(img_path, 224)
         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
 
     def process_query_example(query):
         qid = query['candidate']
         qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".png")
+        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
         ima = process_img(qimage_path, 224)
         qtokens = tokenize(qtext)
         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
@@ -341,7 +341,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
         with open(file_name) as f:
             queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata"))
+    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
     index_image_folder = "/home/zt/data/open-images/train/data"
 
     null_tokens = tokenize("")  # used for index example
@@ -355,7 +355,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
     def process_query_example(query):
         qid = query['candidate']
         qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".png")
+        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
         ima = process_img(qimage_path, 224)
         qtokens = tokenize(qtext)
         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
