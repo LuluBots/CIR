@@ -286,12 +286,21 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 def build_happy_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
     eval_dataset = Dataset(dataset_name)
 
+    # queries = []
+    # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
+    #     with open(file_name) as f:
+    #         queries.extend(json.load(f))
+    # index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
+    # index_image_folder = "/home/zt/data/open-images/train/data"
     queries = []
-    for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
+    file_path_pattern = "/home/zt/data/open-images/train/processed_nn3/response_results_batch_[0-9].json"       
+    files = glob.glob(file_path_pattern)
+    for file_name in files:
         with open(file_name) as f:
             queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
-    index_image_folder = "/home/zt/data/open-images/train/data"
+    with open(f"/home/zt/data/open-images/train/metadata/image_id.json") as f:
+        index_img_ids = json.load(f)[:200000]
+    index_image_folder = "/home/zt/data/open-images/train/data" 
 
     null_tokens = tokenize("")  # used for index example
     null_tokens = np.array(null_tokens)
@@ -337,13 +346,23 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
 def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
     train_dataset = Dataset(dataset_name)
 
+    # queries = []
+    # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
+    #     with open(file_name) as f:
+    #         queries.extend(json.load(f))
+    # index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
+    # index_image_folder = "/home/zt/data/open-images/train/data"
+
     queries = []
-    for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
+    file_path_pattern = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_[0-9].json"       
+    files = glob.glob(file_path_pattern)
+    for file_name in files:
         with open(file_name) as f:
             queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
-    index_image_folder = "/home/zt/data/open-images/train/data"
-
+    with open(f"/home/zt/data/open-images/train/metadata/image_id.json") as f:
+        index_img_ids = json.load(f)[:200000]
+    index_image_folder = "/home/zt/data/open-images/train/data" 
+    
     null_tokens = tokenize("")  # used for index example
     null_tokens = np.array(null_tokens)
 
