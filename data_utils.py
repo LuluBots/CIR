@@ -5,13 +5,13 @@ import json
 import glob
 from typing import Any, List, Union
 from tqdm import tqdm
-import gc
+
 import torch
 import numpy as np
 from PIL import Image
 from CLIP.clip import tokenize
 from CLIP.clip.simple_tokenizer import SimpleTokenizer
-import pickle
+
 @dataclass
 class QueryExample:
     qid: str
@@ -119,7 +119,7 @@ def build_fiq_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
                 eval_dataset.index_examples.append(index_example)
                 progress.update(1)
 
-        
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -130,7 +130,7 @@ def build_fiq_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
                 eval_dataset.query_examples.append(q_example)
                 progress.update(1)
             
-        
+        print("Prepared query examples.")
 
 
     return eval_dataset
@@ -168,7 +168,7 @@ def build_fiq_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
                 train_dataset.index_examples.append(index_example)
                 progress.update(1)
 
-        
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -179,7 +179,7 @@ def build_fiq_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
                 train_dataset.query_examples.append(q_example)
                 progress.update(1)
         
-        
+        print("Prepared query examples.")
 
     return train_dataset
 
@@ -219,7 +219,7 @@ def build_circo_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
                 eval_dataset.index_examples.append(index_example)
                 progress.update(1)
 
-        
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -229,7 +229,7 @@ def build_circo_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
                 q_example = future.result()
                 eval_dataset.query_examples.append(q_example)
                 progress.update(1)
-        
+        print("Prepared query examples.")
 
     return eval_dataset
 
@@ -269,7 +269,7 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
                 train_dataset.index_examples.append(index_example)
                 progress.update(1)
 
-        
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -279,7 +279,7 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
                 q_example = future.result()
                 train_dataset.query_examples.append(q_example)
                 progress.update(1)
-        
+        print("Prepared query examples.")
 
     return train_dataset
 
@@ -319,7 +319,7 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 #                 eval_dataset.index_examples.append(index_example)
 #                 progress.update(1)
 
-#         
+#         print("Prepared index examples.")
 
 #         print("Preparing query examples...")
 #         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -330,24 +330,11 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 #                 eval_dataset.query_examples.append(q_example)
 #                 progress.update(1)
         
-#         
+#         print("Prepared query examples.")
 
 #     return eval_dataset
 
-
-def write_index_example_to_file(index_example, file_path):
-    """将 IndexExample 写入文件"""
-    with open(file_path, 'ab') as f:  # 以二进制模式追加
-        pickle.dump(index_example, f)
-
-
-def write_query_example_to_file(query_example, file_path):
-    """将 QueryExample 写入文件"""
-    with open(file_path, 'ab') as f:  # 以二进制模式追加
-        pickle.dump(query_example, f)
-
-# def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
-def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'eval_index_examples.pkl', query_output_file: str = 'eval_query_examples.pkl') -> Dataset:
+def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
     eval_dataset = Dataset(dataset_name)
 
     queries = []
@@ -382,26 +369,15 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
         index_example_futures = []
         for img_id_batch in batch_generator(index_img_ids, batch_size):
             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-            # index_example_futures.extend(future_batch.items())
+            index_example_futures.extend(future_batch.items())
 
-            # with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-            #     for future in as_completed(future_batch):
-            #         index_example = future.result()
-            #         eval_dataset.index_examples.append(index_example)
-            #         progress.update(1)
             with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
                 for future in as_completed(future_batch):
                     index_example = future.result()
-                    # 写入文件以减少内存占用
-                    write_index_example_to_file(index_example, index_output_file)
-
-                    # 每处理一定数量后进行内存释放
-                    if len(eval_dataset.index_examples) % 100000 == 0:
-                        del index_example
-                        gc.collect()
-                    
+                    eval_dataset.index_examples.append(index_example)
                     progress.update(1)
-        
+
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -409,17 +385,10 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
         with tqdm(total=len(queries), desc="Query examples") as progress:
             for future in as_completed(query_futures):
                 q_example = future.result()
-                # eval_dataset.query_examples.append(q_example)
-                # progress.update(1)
-                # 写入文件以减少内存占用
-                write_query_example_to_file(q_example, query_output_file)
-                
-                # 每处理一定数量后进行内存释放
-                if len(eval_dataset.query_examples) % 100000 == 0:
-                    del q_example
-                    gc.collect()
-
+                eval_dataset.query_examples.append(q_example)
                 progress.update(1)
+        
+        print("Prepared query examples.")
 
     return eval_dataset
 
@@ -469,7 +438,7 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
 #                 train_dataset.index_examples.append(index_example)
 #                 progress.update(1)
 
-#         
+#         print("Prepared index examples.")
 
 #         print("Preparing query examples...")
 #         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -480,14 +449,12 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
 #                 train_dataset.query_examples.append(q_example)
 #                 progress.update(1)
             
-#         
+#         print("Prepared query examples.")
 
 
 #     return train_dataset
 
-# def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
-def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'train_index_examples.pkl', query_output_file: str = 'train_query_examples.pkl') -> Dataset:
-
+def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
     train_dataset = Dataset(dataset_name)
 
     queries = []
@@ -517,55 +484,20 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         for i in range(0, len(index_img_ids), batch_size):
             yield index_img_ids[i:i + batch_size]
 
-    # with ThreadPoolExecutor() as executor:
-    #     print("Preparing index examples...")
-    #     index_example_futures = []
-    #     for img_id_batch in batch_generator(index_img_ids, batch_size):
-    #         future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-    #         index_example_futures.extend(future_batch.items())
-
-    #         with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-    #             for future in as_completed(future_batch):
-    #                 index_example = future.result()
-    #                 train_dataset.index_examples.append(index_example)
-    #                 progress.update(1)
-
-        
-
-    #     print("Preparing query examples...")
-    #     query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-    #     with tqdm(total=len(queries), desc="Query examples") as progress:
-    #         for future in as_completed(query_futures):
-    #             q_example = future.result()
-    #             train_dataset.query_examples.append(q_example)
-    #             progress.update(1)
-
     with ThreadPoolExecutor() as executor:
         print("Preparing index examples...")
         index_example_futures = []
         for img_id_batch in batch_generator(index_img_ids, batch_size):
             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-            # index_example_futures.extend(future_batch.items())
+            index_example_futures.extend(future_batch.items())
 
-            # with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-            #     for future in as_completed(future_batch):
-            #         index_example = future.result()
-            #         eval_dataset.index_examples.append(index_example)
-            #         progress.update(1)
             with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
                 for future in as_completed(future_batch):
                     index_example = future.result()
-                    # 写入文件以减少内存占用
-                    write_index_example_to_file(index_example, index_output_file)
-
-                    # 每处理一定数量后进行内存释放
-                    if len(train_dataset.index_examples) % 100000 == 0:
-                        del index_example
-                        gc.collect()
-                    
+                    train_dataset.index_examples.append(index_example)
                     progress.update(1)
-        
+
+        print("Prepared index examples.")
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -573,17 +505,9 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         with tqdm(total=len(queries), desc="Query examples") as progress:
             for future in as_completed(query_futures):
                 q_example = future.result()
-                # eval_dataset.query_examples.append(q_example)
-                # progress.update(1)
-                # 写入文件以减少内存占用
-                write_query_example_to_file(q_example, query_output_file)
-                
-                # 每处理一定数量后进行内存释放
-                if len(train_dataset.query_examples) % 100000 == 0:
-                    del q_example
-                    gc.collect()
-
-                progress.update(1)    
+                train_dataset.query_examples.append(q_example)
+                progress.update(1)
         
+        print("Prepared query examples.")
 
     return train_dataset
