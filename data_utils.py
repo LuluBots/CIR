@@ -5,7 +5,7 @@ import json
 import glob
 from typing import Any, List, Union
 from tqdm import tqdm
-
+import psutil
 import torch
 import numpy as np
 from PIL import Image
@@ -496,6 +496,9 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
                     index_example = future.result()
                     train_dataset.index_examples.append(index_example)
                     progress.update(1)
+            mem = psutil.virtual_memory()
+            print(f"Memory usage after processing batch: {mem.percent}% used")
+
 
         print("Prepared index examples.")
 
@@ -507,6 +510,9 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
                 q_example = future.result()
                 train_dataset.query_examples.append(q_example)
                 progress.update(1)
+        
+        mem = psutil.virtual_memory()
+        print(f"Final memory usage: {mem.percent}% used")
         
         print("Prepared query examples.")
 
