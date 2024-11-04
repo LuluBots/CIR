@@ -546,7 +546,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
                 yield img_id
 
     queries = load_queries("/home/zt/data/open-images/train/processed_nn1/query.json")
-    
+
     # 使用生成器读取 index_img_ids
     def load_index_img_ids(file_path):
         with open(file_path) as f:
@@ -595,7 +595,8 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
         
-        with tqdm(total=len(queries), desc="Query examples") as progress:
+        # with tqdm(total=len(queries), desc="Query examples") as progress:
+        with tqdm(total=None, desc="Query examples") as progress:
             for future in as_completed(query_futures):
                 q_example = future.result()
                 train_dataset.query_examples.append(q_example)
@@ -612,7 +613,9 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
             index_example_futures.extend(future_batch.items())
 
-            with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
+            # with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
+            with tqdm(total=None, desc="Index examples") as progress:
+
                 for future in as_completed(future_batch):
                     index_example = future.result()
                     train_dataset.index_examples.append(index_example)
