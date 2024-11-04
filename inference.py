@@ -3,7 +3,7 @@ import torch
 import os
 import json
 from argparse import ArgumentParser
-from data_utils import build_circo_dataset, build_fiq_dataset
+from data_utils import build_circo_dataset, build_fiq_dataset, build_happy_dataset
 from model import MagicLens
 import CLIP.clip as clip
 
@@ -51,9 +51,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default="fiq-shirt",
+        default="happy",
         help="Dataset selection.",
-        choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin"],
+        choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin","happy"],
     )
     parser.add_argument(
         "--output",
@@ -79,6 +79,8 @@ if __name__ == "__main__":
         eval_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["circo"]:
         eval_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+    elif args.dataset in ["happy"]:
+        val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     else:
         raise NotImplementedError
     
@@ -137,7 +139,7 @@ if __name__ == "__main__":
     with open("retrieval_results.json", "w") as f:
         json.dump(results, f, indent=4)
 
-    if args.dataset in ["fiq-dress", "fiq-shirt", "fiq-toptee"]:
+    if args.dataset in ["fiq-dress", "fiq-shirt", "fiq-toptee", "happy"]:
         eval_dataset.evaluate_recall()
     elif args.dataset in ["circo"]:
         eval_dataset.write_to_file(os.path.join(args.output, args.dataset + "_" + args.model_size))
