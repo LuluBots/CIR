@@ -2,6 +2,7 @@ import torch.nn as nn
 import os
 import sys
 import time
+import json
 from datetime import datetime
 from argparse import ArgumentParser
 import numpy as np
@@ -15,7 +16,24 @@ from CLIP.clip import tokenize
 from model import MagicLens
 from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train, build_happy_dataset, build_happy_dataset_for_train
 torch.cuda.empty_cache()
+from dataclasses import dataclass, field
+from typing import Any, List, Union
 
+
+@dataclass
+class QueryExample:
+    qid: str
+    qtokens: np.ndarray
+    qimage: np.ndarray
+    target_iid: Union[int, str, List[int], List[str], None] # can be int or 
+    retrieved_iids: List[Union[int, str]] # ranked by score, can be str (cirr) or int (circo)
+    retrieved_scores: List[float] # ranked by order
+
+@dataclass
+class IndexExample:
+    iid: Union[int, str]
+    iimage: np.ndarray
+    itokens: np.ndarray
 
 def contrastive_loss(query_embeddings, target_embeddings, temperature=0.07):
     similarities = F.cosine_similarity(query_embeddings.unsqueeze(1), target_embeddings.unsqueeze(0), dim=2)
@@ -52,29 +70,12 @@ def prepare_batch(batch, device, dataset):
                 next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == iid), None)
                 for iid in target_iid
             ]
-            """
-            target_iimages = [] 
-            for iid in target_iid:
-                found_image = None  
-                for index_example in dataset.index_examples:
-                    if index_example.iid == iid:  
-                        found_image = index_example.iimage  
-                        break 
-                target_iimages.append(found_image)  
-            """
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
 
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
             timage = next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == target_iid), None)
-            """
-            timage = None
-            for index_example in dataset.index_examples:
-                if index_example.iid == target_iid:
-                    timage = index_example.iimage
-                    break
-            """
             if timage is not None:
                 timages.append(torch.tensor(timage))
 
@@ -89,34 +90,46 @@ def prepare_batch(batch, device, dataset):
 
     return qimages, qtokens, timages, ttokens
 
-def validate_model(model, val_dataset, criterion, args):
-    # model.to(device).float()
-    model.float()
-    model.eval()
-    total_loss = 0.0
-    num_batches = int(len(val_dataset.query_examples) / args.batch_size)
+# def validate_model(model, val_dataset, criterion, args):
+#     # model.to(device).float()
+#     model.float()
+#     model.eval()
+#     total_loss = 0.0
+#     num_batches = int(len(val_dataset.query_examples) / args.batch_size)
 
-    with torch.no_grad():
-        for batch_idx in tqdm(range(num_batches), desc="Validating"):
-            batch = val_dataset.query_examples[batch_idx * args.batch_size: (batch_idx + 1) * args.batch_size]
-            qimages, qtokens, timages, ttokens = prepare_batch(batch, device, val_dataset)
+#     with torch.no_grad():
+#         for batch_idx in tqdm(range(num_batches), desc="Validating"):
+#             batch = val_dataset.query_examples[batch_idx * args.batch_size: (batch_idx + 1) * args.batch_size]
+#             qimages, qtokens, timages, ttokens = prepare_batch(batch, device, val_dataset)
 
-            qoutput = model({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"]
+#             qoutput = model({"ids": qtokens, "image": qimages})
+#             query_embeddings = qoutput["multimodal_embed_norm"]
 
-            toutput = model({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"]
+#             toutput = model({"ids": ttokens, "image": timages})
+#             target_embeddings = toutput["multimodal_embed_norm"]
 
-            loss = criterion(query_embeddings, target_embeddings)
-            total_loss += loss.item()
+#             loss = criterion(query_embeddings, target_embeddings)
+#             total_loss += loss.item()
 
-    avg_loss = total_loss / num_batches
-    print(f"Validation Loss: {avg_loss:.4f}")
-    return avg_loss
+#     avg_loss = total_loss / num_batches
+#     print(f"Validation Loss: {avg_loss:.4f}")
+#     return avg_loss
 
-def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
+def load_examples_from_file(file_path, example_class):
+    """从文件中加载示例"""
+    examples = []
+    with open(file_path, 'r') as f:
+        for line in f:
+            example_data = json.loads(line.strip())
+            examples.append(example_class(**example_data))
+    return examples
+
+
+# def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
+def train_model(model, train_dataset, optimizer, criterion, args):
+
     model.train().float()
-    best_val_loss = float('inf')
+    # best_val_loss = float('inf')
 
     for epoch in range(args.epochs):
         total_loss = 0.0
@@ -149,12 +162,12 @@ def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
         avg_loss = total_loss / num_batches
         print(f"Epoch [{epoch + 1}/{args.epochs}], Training Loss: {avg_loss:.4f}")
 
-        val_loss = validate_model(model, val_dataset, criterion, args)
+        # val_loss = validate_model(model, val_dataset, criterion, args)
         if args.rank == 0:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
-                print(f"Best model weights saved for epoch {epoch + 1}.")
+        #     if val_loss < best_val_loss:
+        #         best_val_loss = val_loss
+        #         torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
+        #         print(f"Best model weights saved for epoch {epoch + 1}.")
 
             torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
 
@@ -195,17 +208,26 @@ if __name__ == "__main__":
     if args.dataset.startswith("fiq"):
         subtask = args.dataset.split("-")[1]
         train_dataset = build_fiq_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["circo"]:
         train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["happy"]:
         train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
 
     else:
         raise NotImplementedError
     
-    train_model(model, train_dataset, val_dataset, optimizer, criterion, args) 
+    # 加载 index_examples 和 query_examples
+    index_examples_file = 'index_examples.json'
+    query_examples_file = 'query_examples.json'
+
+    train_dataset.index_examples = load_examples_from_file(index_examples_file, IndexExample)
+    train_dataset.query_examples = load_examples_from_file(query_examples_file, QueryExample)
+
+    # train_model(model, train_dataset, val_dataset, optimizer, criterion, args) 
+    train_model(model, train_dataset, optimizer, criterion, args) 
+
 
     print("Training Done.")
