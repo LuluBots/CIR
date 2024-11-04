@@ -457,11 +457,16 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
 def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
     train_dataset = Dataset(dataset_name)
 
-    # queries = []
+    queries = []
     # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
     #     with open(file_name) as f:
     #         queries.extend(json.load(f))
-    queries = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/query.json"))
+
+    for i in range(20):  # 从0到19
+        file_name = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_{}.json".format(i)
+        if glob.glob(file_name):  # 检查文件是否存在
+            with open(file_name) as f:
+                queries.extend(json.load(f))
     index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/index.json"))
     index_image_folder = "/home/zt/data/open-images/train/data"
 
@@ -489,6 +494,21 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         mem = psutil.virtual_memory()
         print(f"Memory usage before processing batch: {mem.percent}% used")
 
+        print("Preparing query examples...")
+        query_futures = {executor.submit(process_query_example, query): query for query in queries}
+
+        with tqdm(total=len(queries), desc="Query examples") as progress:
+            for future in as_completed(query_futures):
+                q_example = future.result()
+                train_dataset.query_examples.append(q_example)
+                progress.update(1)
+        
+        mem = psutil.virtual_memory()
+        print(f"Final memory usage: {mem.percent}% used")
+
+        print("Prepared query examples.")
+
+
         print("Preparing index examples...")
         index_example_futures = []
         for img_id_batch in batch_generator(index_img_ids, batch_size):
@@ -508,22 +528,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
             print(f"Memory usage after processing batch: {mem.percent}% used")
 
         print("Prepared index examples.")
-
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                train_dataset.query_examples.append(q_example)
-                progress.update(1)
         
-        mem = psutil.virtual_memory()
-        print(f"Final memory usage: {mem.percent}% used")
-
-        print("Prepared query examples.")
-
     return train_dataset
 
 
