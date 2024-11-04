@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 from CLIP.clip import tokenize
 from CLIP.clip.simple_tokenizer import SimpleTokenizer
-
+import pickle
 @dataclass
 class QueryExample:
     qid: str
@@ -337,18 +337,17 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 
 def write_index_example_to_file(index_example, file_path):
     """将 IndexExample 写入文件"""
-    with open(file_path, 'a') as f:
-        json.dump(index_example.__dict__, f)
-        f.write('\n')  # 每个示例一行
+    with open(file_path, 'ab') as f:  # 以二进制模式追加
+        pickle.dump(index_example, f)
+
 
 def write_query_example_to_file(query_example, file_path):
     """将 QueryExample 写入文件"""
-    with open(file_path, 'a') as f:
-        json.dump(query_example.__dict__, f)
-        f.write('\n')  # 每个示例一行
+    with open(file_path, 'ab') as f:  # 以二进制模式追加
+        pickle.dump(query_example, f)
 
 # def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
-def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'eval_index_examples.json', query_output_file: str = 'eval_query_examples.json') -> Dataset:
+def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'eval_index_examples.pkl', query_output_file: str = 'eval_query_examples.pkl') -> Dataset:
     eval_dataset = Dataset(dataset_name)
 
     queries = []
@@ -487,7 +486,7 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
 #     return train_dataset
 
 # def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000) -> Dataset:
-def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'train_index_examples.json', query_output_file: str = 'train_query_examples.json') -> Dataset:
+def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 100000, index_output_file: str = 'train_index_examples.pkl', query_output_file: str = 'train_query_examples.pkl') -> Dataset:
 
     train_dataset = Dataset(dataset_name)
 
