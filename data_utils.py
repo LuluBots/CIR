@@ -37,7 +37,7 @@ class Dataset:
     def evaluate_recall(self):
         ret_dict = {k: [] for k in self.k_range}  # 初始化返回字典，记录每个k值的召回情况
         with open('retrieved_iids_output_shirt.txt', 'w') as f: 
-            for q_example in self.query_examples[:-1700000]:  # 遍历每个查询示例
+            for q_example in self.query_examples:  # 遍历每个查询示例
                 assert len(q_example.retrieved_iids) > 0, "retrieved_iids is empty"  # 可选：确保检索的iid不为空
                 f.write(f"Query ids: {q_example.qid}\n")
                 f.write(f"Query tokens: {q_example.qtokens}\n")
@@ -60,7 +60,7 @@ class Dataset:
                     else:
                         ret_dict[k].append(0)  # 记录0
 
-        total_ex = len(self.query_examples) - 1700000 # 查询示例的总数
+        total_ex = len(self.query_examples) # 查询示例的总数
         ret_dict = {k: (sum(v) / total_ex) * 100 for k, v in ret_dict.items()}  # 计算召回率并转为百分比
         print("Recalls: ", ret_dict)  # 打印召回率
 
@@ -333,14 +333,79 @@ def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 
 #     return eval_dataset
 
+# def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
+#     eval_dataset = Dataset(dataset_name)
+
+#     queries = []
+#     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
+#         with open(file_name) as f:
+#             queries.extend(json.load(f))
+#     index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
+#     index_image_folder = "/home/zt/data/open-images/train/data"
+
+#     null_tokens = tokenize("")  # used for index example
+#     null_tokens = np.array(null_tokens)
+
+#     def process_index_example(index_img_id):
+#         img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
+#         ima = process_img(img_path, 224)
+#         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
+
+#     def process_query_example(query):
+#         qid = query['candidate']
+#         qtext = " and ".join(query['captions'])
+#         qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
+#         ima = process_img(qimage_path, 224)
+#         qtokens = tokenize(qtext)
+#         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
+
+#     def batch_generator(index_img_ids, batch_size):
+#         for i in range(0, len(index_img_ids), batch_size):
+#             yield index_img_ids[i:i + batch_size]
+
+#     with ThreadPoolExecutor() as executor:
+#         print("Preparing index examples...")
+#         index_example_futures = []
+#         for img_id_batch in batch_generator(index_img_ids, batch_size):
+#             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
+#             index_example_futures.extend(future_batch.items())
+
+#             with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
+#                 for future in as_completed(future_batch):
+#                     index_example = future.result()
+#                     eval_dataset.index_examples.append(index_example)
+#                     progress.update(1)
+
+#         print("Prepared index examples.")
+
+#         print("Preparing query examples...")
+#         query_futures = {executor.submit(process_query_example, query): query for query in queries}
+
+#         with tqdm(total=len(queries), desc="Query examples") as progress:
+#             for future in as_completed(query_futures):
+#                 q_example = future.result()
+#                 eval_dataset.query_examples.append(q_example)
+#                 progress.update(1)
+        
+#         print("Prepared query examples.")
+
+#     return eval_dataset
+
+
 def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
     eval_dataset = Dataset(dataset_name)
 
     queries = []
-    for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
-        with open(file_name) as f:
-            queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
+    # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
+    #     with open(file_name) as f:
+    #         queries.extend(json.load(f))
+
+    for i in range(20):  # 从0到19
+        file_name = "/home/zt/data/open-images/train/processed_nn2/response_results_batch_{}.json".format(i)
+        if glob.glob(file_name):  # 检查文件是否存在
+            with open(file_name) as f:
+                queries.extend(json.load(f))
+    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn2/index.json"))
     index_image_folder = "/home/zt/data/open-images/train/data"
 
     null_tokens = tokenize("")  # used for index example
@@ -359,24 +424,23 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
         qtokens = tokenize(qtext)
         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
 
-    def batch_generator(index_img_ids, batch_size):
-        for i in range(0, len(index_img_ids), batch_size):
-            yield index_img_ids[i:i + batch_size]
-
     with ThreadPoolExecutor() as executor:
-        print("Preparing index examples...")
-        index_example_futures = []
-        for img_id_batch in batch_generator(index_img_ids, batch_size):
-            future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-            index_example_futures.extend(future_batch.items())
+        mem = psutil.virtual_memory()
+        print(f"Memory usage before processing batch: {mem.percent}% used")
 
-            with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-                for future in as_completed(future_batch):
-                    index_example = future.result()
-                    eval_dataset.index_examples.append(index_example)
-                    progress.update(1)
+
+        print("Preparing index examples...")
+        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
+        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
+            for future in as_completed(index_example_futures):
+                index_example = future.result()
+                eval_dataset.index_examples.append(index_example)
+                progress.update(1)    
+            mem = psutil.virtual_memory()
+            print(f"Memory usage after processing batch: {mem.percent}% used")
 
         print("Prepared index examples.")
+
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -387,9 +451,13 @@ def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 100
                 eval_dataset.query_examples.append(q_example)
                 progress.update(1)
         
+        mem = psutil.virtual_memory()
+        print(f"Final memory usage: {mem.percent}% used")
+
         print("Prepared query examples.")
 
     return eval_dataset
+
 
 # def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
 #     train_dataset = Dataset(dataset_name)
@@ -486,13 +554,27 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         qtokens = tokenize(qtext)
         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
 
-    def batch_generator(index_img_ids, batch_size):
-        for i in range(0, len(index_img_ids), batch_size):
-            yield index_img_ids[i:i + batch_size]
+    # def batch_generator(index_img_ids, batch_size):
+    #     for i in range(0, len(index_img_ids), batch_size):
+    #         yield index_img_ids[i:i + batch_size]
 
     with ThreadPoolExecutor() as executor:
         mem = psutil.virtual_memory()
         print(f"Memory usage before processing batch: {mem.percent}% used")
+
+
+        print("Preparing index examples...")
+        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
+        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
+            for future in as_completed(index_example_futures):
+                index_example = future.result()
+                train_dataset.index_examples.append(index_example)
+                progress.update(1)    
+            mem = psutil.virtual_memory()
+            print(f"Memory usage after processing batch: {mem.percent}% used")
+
+        print("Prepared index examples.")
+
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
@@ -509,26 +591,22 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         print("Prepared query examples.")
 
 
-        print("Preparing index examples...")
-        index_example_futures = []
-        for img_id_batch in batch_generator(index_img_ids, batch_size):
-            future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-            index_example_futures.extend(future_batch.items())
+        # index_example_futures = []
+        # for img_id_batch in batch_generator(index_img_ids, batch_size):
+        #     future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
+        #     index_example_futures.extend(future_batch.items())
 
-            with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-                for future in as_completed(future_batch):
-                    index_example = future.result()
-                    train_dataset.index_examples.append(index_example)
-                    progress.update(1)
-                # 清理
-                future_batch.clear()  # 清空当前批次的未来对象
-                gc.collect()  # 运行垃圾回收
-                
-            mem = psutil.virtual_memory()
-            print(f"Memory usage after processing batch: {mem.percent}% used")
+        #     with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
+        #         for future in as_completed(future_batch):
+        #             index_example = future.result()
+        #             train_dataset.index_examples.append(index_example)
+        #             progress.update(1)
+        #         # 清理
+        #         future_batch.clear()  # 清空当前批次的未来对象
+        #         gc.collect()  # 运行垃圾回收
+            #         index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
 
-        print("Prepared index examples.")
-        
+
     return train_dataset
 
 
