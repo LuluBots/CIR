@@ -2,7 +2,6 @@ import torch.nn as nn
 import os
 import sys
 import time
-import json
 from datetime import datetime
 from argparse import ArgumentParser
 import numpy as np
@@ -16,24 +15,7 @@ from CLIP.clip import tokenize
 from model import MagicLens
 from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train, build_happy_dataset, build_happy_dataset_for_train
 torch.cuda.empty_cache()
-from dataclasses import dataclass, field
-from typing import Any, List, Union
 
-
-@dataclass
-class QueryExample:
-    qid: str
-    qtokens: np.ndarray
-    qimage: np.ndarray
-    target_iid: Union[int, str, List[int], List[str], None] # can be int or 
-    retrieved_iids: List[Union[int, str]] # ranked by score, can be str (cirr) or int (circo)
-    retrieved_scores: List[float] # ranked by order
-
-@dataclass
-class IndexExample:
-    iid: Union[int, str]
-    iimage: np.ndarray
-    itokens: np.ndarray
 
 def contrastive_loss(query_embeddings, target_embeddings, temperature=0.07):
     similarities = F.cosine_similarity(query_embeddings.unsqueeze(1), target_embeddings.unsqueeze(0), dim=2)
@@ -70,12 +52,29 @@ def prepare_batch(batch, device, dataset):
                 next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == iid), None)
                 for iid in target_iid
             ]
+            """
+            target_iimages = [] 
+            for iid in target_iid:
+                found_image = None  
+                for index_example in dataset.index_examples:
+                    if index_example.iid == iid:  
+                        found_image = index_example.iimage  
+                        break 
+                target_iimages.append(found_image)  
+            """
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
 
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
             timage = next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == target_iid), None)
+            """
+            timage = None
+            for index_example in dataset.index_examples:
+                if index_example.iid == target_iid:
+                    timage = index_example.iimage
+                    break
+            """
             if timage is not None:
                 timages.append(torch.tensor(timage))
 
@@ -114,21 +113,6 @@ def prepare_batch(batch, device, dataset):
 #     avg_loss = total_loss / num_batches
 #     print(f"Validation Loss: {avg_loss:.4f}")
 #     return avg_loss
-
-import pickle
-
-def load_examples_from_file(file_path, example_class):
-    """从文件中加载示例"""
-    examples = []
-    with open(file_path, 'rb') as f:  # 以二进制模式读取
-        while True:
-            try:
-                example_data = pickle.load(f)  # 加载一个对象
-                examples.append(example_data)  # 添加到列表中
-            except EOFError:  # 直到文件结束
-                break
-    return examples
-
 
 # def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
 def train_model(model, train_dataset, optimizer, criterion, args):
@@ -213,24 +197,17 @@ if __name__ == "__main__":
     if args.dataset.startswith("fiq"):
         subtask = args.dataset.split("-")[1]
         train_dataset = build_fiq_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        # val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["circo"]:
         train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        # val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["happy"]:
         train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        # val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
 
     else:
         raise NotImplementedError
     
-    # 加载 index_examples 和 query_examples
-    index_examples_file = 'train_index_examples.pkl'
-    query_examples_file = 'train_query_examples.pkl'
-
-    train_dataset.index_examples = load_examples_from_file(index_examples_file, IndexExample)
-    train_dataset.query_examples = load_examples_from_file(query_examples_file, QueryExample)
-
     # train_model(model, train_dataset, val_dataset, optimizer, criterion, args) 
     train_model(model, train_dataset, optimizer, criterion, args) 
 
