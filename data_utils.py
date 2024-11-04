@@ -530,7 +530,6 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
                     yield query
 
     queries = load_queries("/home/zt/data/open-images/train/processed_nn1/*.json")
-    queries = list(queries)  # 如果你的数据集大小仍然很大，可以考虑逐个处理 queries
 
     # 使用生成器读取 index_img_ids
     def load_index_img_ids(file_path):
