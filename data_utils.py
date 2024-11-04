@@ -1,713 +1,215 @@
+import torch.nn as nn
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-import json
-import glob
-from typing import Any, List, Union
-from tqdm import tqdm
-import psutil
-import torch
+import sys
+import time
+from datetime import datetime
+from argparse import ArgumentParser
 import numpy as np
-from PIL import Image
+from tqdm import tqdm
+import torch
+import torch.nn.functional as F
+import torch.optim as optim
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+import CLIP.clip as clip
 from CLIP.clip import tokenize
-from CLIP.clip.simple_tokenizer import SimpleTokenizer
-import gc
-@dataclass
-class QueryExample:
-    qid: str
-    qtokens: np.ndarray
-    qimage: np.ndarray
-    target_iid: Union[int, str, List[int], List[str], None] # can be int or 
-    retrieved_iids: List[Union[int, str]] # ranked by score, can be str (cirr) or int (circo)
-    retrieved_scores: List[float] # ranked by order
-
-@dataclass
-class IndexExample:
-    iid: Union[int, str]
-    iimage: np.ndarray
-    itokens: np.ndarray
-
-@dataclass
-class Dataset:
-    name: str  # 数据集名称
-    query_examples: List[QueryExample] = field(default_factory=list)  # 查询示例列表
-    k_range: List[int] = field(default_factory=lambda: [10, 50])  # k的范围，默认是[10, 50]
-    index_examples: List[IndexExample] = field(default_factory=list)  # 索引示例列表
-
-    def evaluate_recall(self):
-        ret_dict = {k: [] for k in self.k_range}  # 初始化返回字典，记录每个k值的召回情况
-        with open('retrieved_iids_output_shirt.txt', 'w') as f: 
-            for q_example in self.query_examples:  # 遍历每个查询示例
-                assert len(q_example.retrieved_iids) > 0, "retrieved_iids is empty"  # 可选：确保检索的iid不为空
-                f.write(f"Query ids: {q_example.qid}\n")
-                f.write(f"Query tokens: {q_example.qtokens}\n")
-                f.write(f"Retrieved IIDs: {q_example.retrieved_iids}\n")
-        
-                for k in self.k_range:  # 对于每个k值
-                    recalled = False  # 初始化召回标志为False
-                    if isinstance(q_example.target_iid, list):  # 如果目标iid是列表
-                        for one_target_iid in q_example.target_iid:  # 遍历每个目标iid
-                            if one_target_iid in q_example.retrieved_iids[:k]:  # 检查目标iid是否在检索结果中
-                                recalled = True  # 如果找到，设置召回标志为True
-                    elif isinstance(q_example.target_iid, int) or isinstance(q_example.target_iid, str):  # 如果目标iid是int或str
-                        if q_example.target_iid in q_example.retrieved_iids[:k]:  # 检查目标iid是否在检索结果中
-                            recalled = True  # 如果找到，设置召回标志为True
-                    else:
-                        raise ValueError(f"target_iid is of type {type(q_example.target_iid)}")  # 抛出异常，类型不匹配
-
-                    if recalled:  # 如果召回成功
-                        ret_dict[k].append(1)  # 记录1
-                    else:
-                        ret_dict[k].append(0)  # 记录0
-
-        total_ex = len(self.query_examples) # 查询示例的总数
-        ret_dict = {k: (sum(v) / total_ex) * 100 for k, v in ret_dict.items()}  # 计算召回率并转为百分比
-        print("Recalls: ", ret_dict)  # 打印召回率
-
-        return ret_dict  # 返回召回率字典
-
-    def write_to_file(self, output_dir: str):
-        if not os.path.exists(output_dir):  # 检查输出目录是否存在
-            os.makedirs(output_dir)  # 如果不存在，则创建目录
-
-        dict_to_write = dict()  # 初始化待写入的字典
-        for q_example in self.query_examples:  # 遍历每个查询示例
-            dict_to_write[q_example.qid] = q_example.retrieved_iids[:50]  # 记录查询ID及其检索结果（前50个）
-        output_file = os.path.join(output_dir, f"{self.name}_results.json")  # 构建输出文件路径
-        with open(output_file, "w") as f:  # 打开文件进行写入
-            json.dump(dict_to_write, f, indent=4)  # 将字典写入JSON文件
-        print("Results are written to file", output_file)  # 打印写入完成信息
-
-def process_img(image_path: str, size: int) -> np.ndarray:
-    """Process a single image to 224x224 and normalize."""
-    img = Image.open(image_path).convert("RGB")
-    img = img.resize((size, size), Image.BILINEAR)
-    ima = np.array(img) / 255.0  # Normalize to [0, 1]
-    return ima  # [H, W, C]
-
-def build_fiq_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
-    eval_dataset = Dataset(dataset_name)
-    subtask = dataset_name.split("-")[1]
-    queries = json.load(open(f"./data/fiq/captions/cap.{subtask}.val.json"))
-    index_img_ids = json.load(open(f"./data/fiq/image_splits/split.{subtask}.val.json"))
-    index_image_folder = "./data/fiq/images"
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, index_img_id + ".png")
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['candidate']
-        qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".png")
-        ima = process_img(qimage_path, 224)
-        qtokens = tokenize(qtext)
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-    with ThreadPoolExecutor() as executor:
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                eval_dataset.index_examples.append(index_example)
-                progress.update(1)
-
-        print("Prepared index examples.")
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                eval_dataset.query_examples.append(q_example)
-                progress.update(1)
-            
-        print("Prepared query examples.")
-
-
-    return eval_dataset
-
-def build_fiq_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
-    train_dataset = Dataset(dataset_name)
-    subtask = dataset_name.split("-")[1]
-    queries = json.load(open(f"./data/fiq/captions/cap.{subtask}.train.json"))
-    index_img_ids = json.load(open(f"./data/fiq/image_splits/split.{subtask}.train.json"))
-    index_image_folder = "./data/fiq/images"
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, index_img_id + ".png")
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['candidate']
-        qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".png")
-        ima = process_img(qimage_path, 224)
-        qtokens = tokenize(qtext)
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-    with ThreadPoolExecutor() as executor:
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                train_dataset.index_examples.append(index_example)
-                progress.update(1)
-
-        print("Prepared index examples.")
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                train_dataset.query_examples.append(q_example)
-                progress.update(1)
-        
-        print("Prepared query examples.")
-
-    return train_dataset
-
-def build_circo_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
-    eval_dataset = Dataset(dataset_name)
-    queries = json.load(open("./data/circo/annotations/val.json"))
-    coco_info = json.load(open("./data/circo/COCO2017_unlabeled/annotations/image_info_unlabeled2017.json"))
-    index_img_ids = [img_info['id'] for img_info in coco_info['images']]
-    index_image_folder = "./data/circo/COCO2017_unlabeled/unlabeled2017"
-
-    def image_id2name(image_id):
-        return str(image_id).zfill(12) + '.jpg'
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, image_id2name(index_img_id))
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['id']
-        qtext = f"find {query['shared_concept']} but {query['relative_caption']}"
-        qimage_path = os.path.join(index_image_folder, image_id2name(query['reference_img_id']))
-        ima = process_img(qimage_path, 224)
-        qtokens = np.array(tokenize(qtext))
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=0, retrieved_iids=[], retrieved_scores=[])
-
-    with ThreadPoolExecutor() as executor:
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                eval_dataset.index_examples.append(index_example)
-                progress.update(1)
-
-        print("Prepared index examples.")
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                eval_dataset.query_examples.append(q_example)
-                progress.update(1)
-        print("Prepared query examples.")
-
-    return eval_dataset
-
-def build_circo_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
-    train_dataset = Dataset(dataset_name)
-    queries = json.load(open("./data/circo/annotations/train.json"))
-    coco_info = json.load(open("./data/circo/COCO2017_unlabeled/annotations/image_info_unlabeled2017.json"))
-    index_img_ids = [img_info['id'] for img_info in coco_info['images']]
-    index_image_folder = "./data/circo/COCO2017_unlabeled/unlabeled2017"
-
-    def image_id2name(image_id):
-        return str(image_id).zfill(12) + '.jpg'
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, image_id2name(index_img_id))
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['id']
-        qtext = f"find {query['shared_concept']} but {query['relative_caption']}"
-        qimage_path = os.path.join(index_image_folder, image_id2name(query['reference_img_id']))
-        ima = process_img(qimage_path, 224)
-        qtokens = np.array(tokenize(qtext))
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=0, retrieved_iids=[], retrieved_scores=[])
-
-    with ThreadPoolExecutor() as executor:
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                train_dataset.index_examples.append(index_example)
-                progress.update(1)
-
-        print("Prepared index examples.")
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                train_dataset.query_examples.append(q_example)
-                progress.update(1)
-        print("Prepared query examples.")
-
-    return train_dataset
-
-# def build_happy_dataset(dataset_name: str, tokenizer: Any) -> Dataset:
-#     eval_dataset = Dataset(dataset_name)
-
-#     queries = []
-#     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
-#         with open(file_name) as f:
-#             queries.extend(json.load(f))
-#     index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
-#     index_image_folder = "/home/zt/data/open-images/train/data"
-
-#     null_tokens = tokenize("")  # used for index example
-#     null_tokens = np.array(null_tokens)
-
-#     def process_index_example(index_img_id):
-#         img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-#         ima = process_img(img_path, 224)
-#         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-#     def process_query_example(query):
-#         qid = query['candidate']
-#         qtext = " and ".join(query['captions'])
-#         qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-#         ima = process_img(qimage_path, 224)
-#         qtokens = tokenize(qtext)
-#         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-#     with ThreadPoolExecutor() as executor:
-#         print("Preparing index examples...")
-#         index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-#         with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-#             for future in as_completed(index_example_futures):
-#                 index_example = future.result()
-#                 eval_dataset.index_examples.append(index_example)
-#                 progress.update(1)
-
-#         print("Prepared index examples.")
-
-#         print("Preparing query examples...")
-#         query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-#         with tqdm(total=len(queries), desc="Query examples") as progress:
-#             for future in as_completed(query_futures):
-#                 q_example = future.result()
-#                 eval_dataset.query_examples.append(q_example)
-#                 progress.update(1)
-        
-#         print("Prepared query examples.")
-
-#     return eval_dataset
-
-# def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
-#     eval_dataset = Dataset(dataset_name)
-
-#     queries = []
-#     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn3/*.json"):
-#         with open(file_name) as f:
-#             queries.extend(json.load(f))
-#     index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
-#     index_image_folder = "/home/zt/data/open-images/train/data"
-
-#     null_tokens = tokenize("")  # used for index example
-#     null_tokens = np.array(null_tokens)
-
-#     def process_index_example(index_img_id):
-#         img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-#         ima = process_img(img_path, 224)
-#         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-#     def process_query_example(query):
-#         qid = query['candidate']
-#         qtext = " and ".join(query['captions'])
-#         qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-#         ima = process_img(qimage_path, 224)
-#         qtokens = tokenize(qtext)
-#         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-#     def batch_generator(index_img_ids, batch_size):
-#         for i in range(0, len(index_img_ids), batch_size):
-#             yield index_img_ids[i:i + batch_size]
-
-#     with ThreadPoolExecutor() as executor:
-#         print("Preparing index examples...")
-#         index_example_futures = []
-#         for img_id_batch in batch_generator(index_img_ids, batch_size):
-#             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-#             index_example_futures.extend(future_batch.items())
-
-#             with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-#                 for future in as_completed(future_batch):
-#                     index_example = future.result()
-#                     eval_dataset.index_examples.append(index_example)
-#                     progress.update(1)
-
-#         print("Prepared index examples.")
-
-#         print("Preparing query examples...")
-#         query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-#         with tqdm(total=len(queries), desc="Query examples") as progress:
-#             for future in as_completed(query_futures):
-#                 q_example = future.result()
-#                 eval_dataset.query_examples.append(q_example)
-#                 progress.update(1)
-        
-#         print("Prepared query examples.")
-
-#     return eval_dataset
-
-
-def build_happy_dataset(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
-    eval_dataset = Dataset(dataset_name)
-
-    queries = []
-    # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
-    #     with open(file_name) as f:
-    #         queries.extend(json.load(f))
-
-    for i in range(20):  # 从0到19
-        file_name = "/home/zt/data/open-images/train/processed_nn2/response_results_batch_{}.json".format(i)
-        if glob.glob(file_name):  # 检查文件是否存在
-            with open(file_name) as f:
-                queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn2/index.json"))
-    index_image_folder = "/home/zt/data/open-images/train/data"
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['candidate']
-        qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-        ima = process_img(qimage_path, 224)
-        qtokens = tokenize(qtext)
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-    with ThreadPoolExecutor() as executor:
-        mem = psutil.virtual_memory()
-        print(f"Memory usage before processing batch: {mem.percent}% used")
-
-
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                eval_dataset.index_examples.append(index_example)
-                progress.update(1)    
-            mem = psutil.virtual_memory()
-            print(f"Memory usage after processing batch: {mem.percent}% used")
-
-        print("Prepared index examples.")
-
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                eval_dataset.query_examples.append(q_example)
-                progress.update(1)
-        
-        mem = psutil.virtual_memory()
-        print(f"Final memory usage: {mem.percent}% used")
-
-        print("Prepared query examples.")
-
-    return eval_dataset
-
-
-# def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any) -> Dataset:
-#     train_dataset = Dataset(dataset_name)
-
-#     queries = []
-#     for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
-#         with open(file_name) as f:
-#             queries.extend(json.load(f))
-#     index_img_ids = json.load(open(f"/home/zt/data/open-images/train/metadata/image_id.json"))
-#     index_image_folder = "/home/zt/data/open-images/train/data"
-
-#     # queries = []
-#     # file_path_pattern = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_[0-9].json"       
-#     # files = glob.glob(file_path_pattern)
-#     # for file_name in files:
-#     #     with open(file_name) as f:
-#     #         queries.extend(json.load(f))
-#     # with open(f"/home/zt/data/open-images/train/metadata/image_id.json") as f:
-#     #     index_img_ids = json.load(f)[:200000]
-#     # index_image_folder = "/home/zt/data/open-images/train/data" 
+from model import MagicLens
+from data_utils import build_circo_dataset, build_circo_dataset_for_train, build_fiq_dataset, build_fiq_dataset_for_train, build_happy_dataset, build_happy_dataset_for_train
+torch.cuda.empty_cache()
+
+
+def contrastive_loss(query_embeddings, target_embeddings, temperature=0.07):
+    similarities = F.cosine_similarity(query_embeddings.unsqueeze(1), target_embeddings.unsqueeze(0), dim=2)
+    logits = similarities / temperature
+    labels = torch.arange(logits.size(0)).to(logits.device)
+    loss = F.cross_entropy(logits, labels)
+    return loss
+
+def redirect_output_to_log(log_file):
+    class LogRedirector:
+        def __init__(self, log_file):
+            self.log_file = log_file
+            self.terminal = sys.stdout
+            self.log = open(log_file, "a")
+
+        def write(self, message):
+            self.terminal.write(message)
+            self.log.write(message)
+
+        def flush(self):
+            self.terminal.flush()
+            self.log.flush()
+
+    sys.stdout = LogRedirector(log_file)
+
+def prepare_batch(batch, device, dataset):
+    qimages = torch.stack([torch.from_numpy(q.qimage) for q in batch], dim=0).to(device)
+    qtokens = torch.stack([q.qtokens for q in batch], dim=0).to(device)
+
+    timages, ttokens_list = [], []
+    for target_iid in [q.target_iid for q in batch]:
+        if isinstance(target_iid, list):
+            target_iimages = [
+                next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == iid), None)
+                for iid in target_iid
+            ]
+            """
+            target_iimages = [] 
+            for iid in target_iid:
+                found_image = None  
+                for index_example in dataset.index_examples:
+                    if index_example.iid == iid:  
+                        found_image = index_example.iimage  
+                        break 
+                target_iimages.append(found_image)  
+            """
+            timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
+
+            target_tokens = np.array(tokenize("")).astype(np.float32)
+            ttokens_list.append(torch.tensor(target_tokens))
+        else:
+            timage = next((index_example.iimage for index_example in dataset.index_examples if index_example.iid == target_iid), None)
+            """
+            timage = None
+            for index_example in dataset.index_examples:
+                if index_example.iid == target_iid:
+                    timage = index_example.iimage
+                    break
+            """
+            if timage is not None:
+                timages.append(torch.tensor(timage))
+
+                token = np.array(tokenize("")).astype(np.float32)
+                ttokens_list.append(torch.tensor(token))
+            else:
+                raise ValueError(f"Target image with ID {target_iid} not found.")
+
+    assert len(timages) == len(ttokens_list), "Number of images and tokens must match."
+    ttokens = torch.stack(ttokens_list).to(device)
+    timages = torch.stack(timages).to(device)
+
+    return qimages, qtokens, timages, ttokens
+
+# def validate_model(model, val_dataset, criterion, args):
+#     # model.to(device).float()
+#     model.float()
+#     model.eval()
+#     total_loss = 0.0
+#     num_batches = int(len(val_dataset.query_examples) / args.batch_size)
+
+#     with torch.no_grad():
+#         for batch_idx in tqdm(range(num_batches), desc="Validating"):
+#             batch = val_dataset.query_examples[batch_idx * args.batch_size: (batch_idx + 1) * args.batch_size]
+#             qimages, qtokens, timages, ttokens = prepare_batch(batch, device, val_dataset)
+
+#             qoutput = model({"ids": qtokens, "image": qimages})
+#             query_embeddings = qoutput["multimodal_embed_norm"]
+
+#             toutput = model({"ids": ttokens, "image": timages})
+#             target_embeddings = toutput["multimodal_embed_norm"]
+
+#             loss = criterion(query_embeddings, target_embeddings)
+#             total_loss += loss.item()
+
+#     avg_loss = total_loss / num_batches
+#     print(f"Validation Loss: {avg_loss:.4f}")
+#     return avg_loss
+
+# def train_model(model, train_dataset, val_dataset, optimizer, criterion, args):
+def train_model(model, train_dataset, optimizer, criterion, args):
+
+    model.train().float()
+    # best_val_loss = float('inf')
+
+    for epoch in range(args.epochs):
+        total_loss = 0.0
+        num_batches = len(train_dataset.query_examples) // args.batch_size
+
+        for batch_idx in tqdm(range(num_batches), desc=f"Training Epoch {epoch + 1}/{args.epochs}"):
+            optimizer.zero_grad()
+
+            batch = train_dataset.query_examples[batch_idx * args.batch_size: (batch_idx + 1) * args.batch_size]
+            qimages, qtokens, timages, ttokens = prepare_batch(batch, device, train_dataset)
+
+            # 将数据移到 GPU
+            qimages = qimages.to(device)
+            qtokens = qtokens.to(device)
+            timages = timages.to(device)
+            ttokens = ttokens.to(device)
+
+            qoutput = model({"ids": qtokens, "image": qimages})
+            query_embeddings = qoutput["multimodal_embed_norm"]
+
+            toutput = model({"ids": ttokens, "image": timages})
+            target_embeddings = toutput["multimodal_embed_norm"]
+
+            loss = criterion(query_embeddings, target_embeddings)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / num_batches
+        print(f"Epoch [{epoch + 1}/{args.epochs}], Training Loss: {avg_loss:.4f}")
+
+        # val_loss = validate_model(model, val_dataset, criterion, args)
+        if args.rank == 0:
+        #     if val_loss < best_val_loss:
+        #         best_val_loss = val_loss
+        #         torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
+        #         print(f"Best model weights saved for epoch {epoch + 1}.")
+
+            torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
+
+if __name__ == "__main__":
+
+    timestamp = int(time.time())
+    timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d_%H:%M:%S')
+    output_dir = f"train_{timestamp}"
+    os.makedirs(output_dir, exist_ok=True)
+
+    log_file = os.path.join(output_dir, f"train_{timestamp}.log")
+    redirect_output_to_log(log_file)
+
+    parser = ArgumentParser()
+    parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
+    parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
+    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for training.")
+    parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
+    parser.add_argument("--rank", type=int, default=0, help="Rank of the process.")  # 添加 rank 参数
+
+    args = parser.parse_args()
+    # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # model = MagicLens(args.model_size).to(device)
+    # 初始化模型和数据
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MagicLens(args.model_size).to(device)
+
+    # 使用 DataParallel 包装模型
+    if torch.cuda.device_count() > 1:
+        model = nn.DataParallel(model)
     
-#     null_tokens = tokenize("")  # used for index example
-#     null_tokens = np.array(null_tokens)
+    tokenizer = clip.simple_tokenizer.SimpleTokenizer()
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=5, factor=0.8)
+    criterion = contrastive_loss
 
-#     def process_index_example(index_img_id):
-#         img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-#         ima = process_img(img_path, 224)
-#         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
+    if args.dataset.startswith("fiq"):
+        subtask = args.dataset.split("-")[1]
+        train_dataset = build_fiq_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+    elif args.dataset in ["circo"]:
+        train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+    elif args.dataset in ["happy"]:
+        train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
 
-#     def process_query_example(query):
-#         qid = query['candidate']
-#         qtext = " and ".join(query['captions'])
-#         qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-#         ima = process_img(qimage_path, 224)
-#         qtokens = tokenize(qtext)
-#         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-#     with ThreadPoolExecutor() as executor:
-
-#         print("Preparing query examples...")
-#         query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-#         with tqdm(total=len(queries), desc="Query examples") as progress:
-#             for future in as_completed(query_futures):
-#                 q_example = future.result()
-#                 train_dataset.query_examples.append(q_example)
-#                 progress.update(1)
-            
-#         print("Prepared query examples.")
-
-#         print("Preparing index examples...")
-#         index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-#         with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-#             for future in as_completed(index_example_futures):
-#                 index_example = future.result()
-#                 train_dataset.index_examples.append(index_example)
-#                 progress.update(1)
-
-#         print("Prepared index examples.")
+    else:
+        raise NotImplementedError
+    
+    # train_model(model, train_dataset, val_dataset, optimizer, criterion, args) 
+    train_model(model, train_dataset, optimizer, criterion, args) 
 
 
-#     return train_dataset
-
-def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
-    train_dataset = Dataset(dataset_name)
-
-    queries = []
-    # for file_name in glob.glob("/home/zt/data/open-images/train/processed_nn1/*.json") + glob.glob("/home/zt/data/open-images/train/processed_nn2/*.json"):
-    #     with open(file_name) as f:
-    #         queries.extend(json.load(f))
-
-    for i in range(20):  # 从0到19
-        file_name = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_{}.json".format(i)
-        if glob.glob(file_name):  # 检查文件是否存在
-            with open(file_name) as f:
-                queries.extend(json.load(f))
-    index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/index.json"))
-    index_image_folder = "/home/zt/data/open-images/train/data"
-
-    null_tokens = tokenize("")  # used for index example
-    null_tokens = np.array(null_tokens)
-
-    def process_index_example(index_img_id):
-        img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-        ima = process_img(img_path, 224)
-        return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-    def process_query_example(query):
-        qid = query['candidate']
-        qtext = " and ".join(query['captions'])
-        qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-        ima = process_img(qimage_path, 224)
-        qtokens = tokenize(qtext)
-        return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-    # def batch_generator(index_img_ids, batch_size):
-    #     for i in range(0, len(index_img_ids), batch_size):
-    #         yield index_img_ids[i:i + batch_size]
-
-    with ThreadPoolExecutor() as executor:
-        mem = psutil.virtual_memory()
-        print(f"Memory usage before processing batch: {mem.percent}% used")
-
-
-        print("Preparing index examples...")
-        index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-        with tqdm(total=len(index_img_ids), desc="Index examples") as progress:
-            for future in as_completed(index_example_futures):
-                index_example = future.result()
-                train_dataset.index_examples.append(index_example)
-                progress.update(1)    
-            mem = psutil.virtual_memory()
-            print(f"Memory usage after processing batch: {mem.percent}% used")
-
-        print("Prepared index examples.")
-
-
-        print("Preparing query examples...")
-        query_futures = {executor.submit(process_query_example, query): query for query in queries}
-
-        with tqdm(total=len(queries), desc="Query examples") as progress:
-            for future in as_completed(query_futures):
-                q_example = future.result()
-                train_dataset.query_examples.append(q_example)
-                progress.update(1)
-        
-        mem = psutil.virtual_memory()
-        print(f"Final memory usage: {mem.percent}% used")
-
-        print("Prepared query examples.")
-
-
-        # index_example_futures = []
-        # for img_id_batch in batch_generator(index_img_ids, batch_size):
-        #     future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-        #     index_example_futures.extend(future_batch.items())
-
-        #     with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-        #         for future in as_completed(future_batch):
-        #             index_example = future.result()
-        #             train_dataset.index_examples.append(index_example)
-        #             progress.update(1)
-        #         # 清理
-        #         future_batch.clear()  # 清空当前批次的未来对象
-        #         gc.collect()  # 运行垃圾回收
-            #         index_example_futures = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in index_img_ids}
-
-
-    return train_dataset
-
-
-# def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size: int = 10000) -> Dataset:
-#     train_dataset = Dataset(dataset_name)
-
-#     # # 使用生成器逐个读取 queries
-#     # def load_queries(file_pattern):
-#     #     for file_name in glob.glob(file_pattern):
-#     #         with open(file_name) as f:
-#     #             for query in json.load(f):
-#     #                 yield query
-
-#     # queries = load_queries("/home/zt/data/open-images/train/processed_nn1_subset/*.json")
-
-
-#     # 使用生成器读取 query_img_ids
-#     def load_queries(file_path):
-#         with open(file_path) as f:
-#             for img_id in json.load(f):
-#                 yield img_id
-
-#     queries = load_queries("/home/zt/data/open-images/train/processed_nn1/query.json")
-
-#     # 使用生成器读取 index_img_ids
-#     def load_index_img_ids(file_path):
-#         with open(file_path) as f:
-#             for img_id in json.load(f):
-#                 yield img_id
-
-#     index_img_ids = load_index_img_ids("/home/zt/data/open-images/train/processed_nn1/index.json")
-#     index_image_folder = "/home/zt/data/open-images/train/data"
-
-#     null_tokens = tokenize("")  # used for index example
-#     null_tokens = np.array(null_tokens)
-
-#     def process_index_example(index_img_id):
-#         img_path = os.path.join(index_image_folder, index_img_id + ".jpg")
-#         ima = process_img(img_path, 224)
-#         return IndexExample(iid=index_img_id, iimage=ima, itokens=null_tokens)
-
-#     def process_query_example(query):
-#         qid = query['candidate']
-#         qtext = " and ".join(query['captions'])
-#         qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-#         ima = process_img(qimage_path, 224)
-#         qtokens = tokenize(qtext)
-#         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
-
-#     # def batch_generator(index_img_ids, batch_size):
-#     #     for i in range(0, 1743043, batch_size):
-#     #         yield index_img_ids[i:i + batch_size]
-#     def batch_generator(index_img_ids, batch_size):
-#     # 使用生成器逐个加载 index_img_ids
-#         current_batch = []
-#         for img_id in index_img_ids:
-#             current_batch.append(img_id)
-#             if len(current_batch) == batch_size:
-#                 yield current_batch
-#                 current_batch = []  # 重置当前批次
-
-#         # 确保最后一个不完整的批次也被返回
-#         if current_batch:
-#             yield current_batch
-
-#     with ThreadPoolExecutor() as executor:
-#         mem = psutil.virtual_memory()
-#         print(f"Memory usage before processing batch: {mem.percent}% used")
-
-#         print("Preparing query examples...")
-#         query_futures = {executor.submit(process_query_example, query): query for query in queries}
-        
-#         # with tqdm(total=len(queries), desc="Query examples") as progress:
-#         with tqdm(total=None, desc="Query examples") as progress:
-#             for future in as_completed(query_futures):
-#                 q_example = future.result()
-#                 train_dataset.query_examples.append(q_example)
-#                 progress.update(1)
-
-#         mem = psutil.virtual_memory()
-#         print(f"Final memory usage: {mem.percent}% used")
-
-#         print("Prepared query examples.")
-
-#         print("Preparing index examples...")
-#         index_example_futures = []
-#         for img_id_batch in batch_generator(index_img_ids, batch_size):
-#             future_batch = {executor.submit(process_index_example, index_img_id): index_img_id for index_img_id in img_id_batch}
-#             index_example_futures.extend(future_batch.items())
-
-#             # with tqdm(total=len(img_id_batch), desc="Index examples") as progress:
-#             with tqdm(total=None, desc="Index examples") as progress:
-
-#                 for future in as_completed(future_batch):
-#                     index_example = future.result()
-#                     train_dataset.index_examples.append(index_example)
-#                     progress.update(1)
-
-#             mem = psutil.virtual_memory()
-#             print(f"Memory usage after processing batch: {mem.percent}% used")
-
-#         print("Prepared index examples.")
-
-#     return train_dataset
+    print("Training Done.")
