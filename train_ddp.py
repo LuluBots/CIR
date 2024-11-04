@@ -197,13 +197,13 @@ if __name__ == "__main__":
     if args.dataset.startswith("fiq"):
         subtask = args.dataset.split("-")[1]
         train_dataset = build_fiq_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_fiq_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["circo"]:
         train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
     elif args.dataset in ["happy"]:
         train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
+        # val_dataset = build_happy_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
 
     else:
         raise NotImplementedError
