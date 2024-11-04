@@ -530,6 +530,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
                     yield query
 
     queries = load_queries("/home/zt/data/open-images/train/processed_nn1/*.json")
+    queries = queries  # 如果你的数据集大小仍然很大，可以考虑逐个处理 queries
 
     # 使用生成器读取 index_img_ids
     def load_index_img_ids(file_path):
@@ -537,7 +538,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
             for img_id in json.load(f):
                 yield img_id
 
-    index_img_ids = list(load_index_img_ids("/home/zt/data/open-images/train/metadata/image_id.json"))
+    index_img_ids = load_index_img_ids("/home/zt/data/open-images/train/metadata/image_id.json")
     index_image_folder = "/home/zt/data/open-images/train/data"
 
     null_tokens = tokenize("")  # used for index example
@@ -557,7 +558,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
         return QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'], retrieved_iids=[], retrieved_scores=[])
 
     def batch_generator(index_img_ids, batch_size):
-        for i in range(0, len(index_img_ids), batch_size):
+        for i in range(0, 1743043, batch_size):
             yield index_img_ids[i:i + batch_size]
 
     with ThreadPoolExecutor() as executor:
@@ -583,6 +584,7 @@ def build_happy_dataset_for_train(dataset_name: str, tokenizer: Any, batch_size:
 
         print("Preparing query examples...")
         query_futures = {executor.submit(process_query_example, query): query for query in queries}
+        
 
         with tqdm(total=len(queries), desc="Query examples") as progress:
             for future in as_completed(query_futures):
