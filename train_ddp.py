@@ -115,13 +115,18 @@ def prepare_batch(batch, device, dataset):
 #     print(f"Validation Loss: {avg_loss:.4f}")
 #     return avg_loss
 
+import pickle
+
 def load_examples_from_file(file_path, example_class):
     """从文件中加载示例"""
     examples = []
-    with open(file_path, 'r') as f:
-        for line in f:
-            example_data = json.loads(line.strip())
-            examples.append(example_class(**example_data))
+    with open(file_path, 'rb') as f:  # 以二进制模式读取
+        while True:
+            try:
+                example_data = pickle.load(f)  # 加载一个对象
+                examples.append(example_data)  # 添加到列表中
+            except EOFError:  # 直到文件结束
+                break
     return examples
 
 
@@ -220,8 +225,8 @@ if __name__ == "__main__":
         raise NotImplementedError
     
     # 加载 index_examples 和 query_examples
-    index_examples_file = 'index_examples.json'
-    query_examples_file = 'query_examples.json'
+    index_examples_file = 'train_index_examples.pkl'
+    query_examples_file = 'train_query_examples.pkl'
 
     train_dataset.index_examples = load_examples_from_file(index_examples_file, IndexExample)
     train_dataset.query_examples = load_examples_from_file(query_examples_file, QueryExample)
