@@ -28,6 +28,12 @@ from data_dl_zll import build_happy_dataset_for_train
 from torch.utils.data import Dataset, DataLoader
 import psutil
 torch.cuda.empty_cache()
+from PIL import Image
+
+def process_img(image_path: str, size: int) -> np.ndarray:
+        img = Image.open(image_path).convert("RGB")
+        img = img.resize((size, size), Image.BILINEAR)
+        return np.array(img) / 255.0 
 
 def print_memory_usage():
     while True:
@@ -68,17 +74,19 @@ def redirect_output_to_log(log_file):
 
     sys.stdout = LogRedirector(log_file)
 
-def prepare_batch(batch, device):
+def prepare_batch(batch, device, train_dataset):
 
     qimages = torch.stack([qimage for qimage in batch['qimage']], dim=0).to(device)
     qtokens = torch.stack([qtokens for qtokens in batch['qtokens']], dim=0).to(device)
 
     timages, ttokens_list = [], []
+    
     for q in batch['target_iid']:
         target_iid = q
+        
         if isinstance(target_iid, list):
             target_iimages = [
-                next((index_example.iimage for index_example in train_dataset.index_examples if index_example.iid == iid), None)
+                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.png"), 224)
                 for iid in target_iid
             ]
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
@@ -86,8 +94,10 @@ def prepare_batch(batch, device):
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
-            timage = next((index_example.iimage for index_example in train_dataset.index_examples if index_example.iid == target_iid), None)
-
+            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.png")
+            
+            timage = process_img(index_img_path, 224) 
+            
             if timage is not None:
                 timages.append(torch.tensor(timage))
 
@@ -95,8 +105,9 @@ def prepare_batch(batch, device):
                 ttokens_list.append(torch.tensor(token))
             else:
                 raise ValueError(f"Target image with ID {target_iid} not found.")
-
+    
     assert len(timages) == len(ttokens_list), "Number of images and tokens must match."
+    
     ttokens = torch.stack(ttokens_list).to(device)
     timages = torch.stack(timages).to(device)
 
@@ -112,7 +123,7 @@ def train_model(model, train_loader, optimizer, criterion, args):
         for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{args.epochs}")):
             optimizer.zero_grad()
 
-            qimages, qtokens, timages, ttokens = prepare_batch(batch, device)
+            qimages, qtokens, timages, ttokens = prepare_batch(batch, device,train_dataset)
 
             qoutput = model({"ids": qtokens, "image": qimages})
             query_embeddings = qoutput["multimodal_embed_norm"]
