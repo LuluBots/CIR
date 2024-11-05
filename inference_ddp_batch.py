@@ -7,13 +7,6 @@ from data_utils import build_circo_dataset, build_fiq_dataset, build_happy_datas
 from model import MagicLens
 import CLIP.clip as clip
 
-# def load_model(model_size: str) -> torch.nn.Module:
-#     model = MagicLens(model_size)
-#     model.eval()
-#     model.load_state_dict(torch.load(args.model_path, weights_only=True))
-#     print("Model loaded")
-#     return model
-
 def load_model(model_size: str) -> torch.nn.Module:
     model = MagicLens(model_size)
     model.eval()
@@ -38,7 +31,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_path",
         type=str,
-        default="/home/lulu/lulu/magic/magiclens/train_2024-11-03_21:16:21/model_weights_epoch_38.pth",
+        default="/home/zt/ll/magiclens/model_weights_epoch_114.pth",
         help="The path to model directory.",
     )
     parser.add_argument(
@@ -51,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dataset",
         type=str,
-        default="happy",
+        default="fiq-shirt",
         help="Dataset selection.",
         choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin","happy"],
     )
@@ -62,7 +55,7 @@ if __name__ == "__main__":
         help="Output directory of predictions top 50.",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=100, help="Batch size for inference."
+        "--batch_size", type=int, default=50, help="Batch size for inference."
     )
     args = parser.parse_args()
 
