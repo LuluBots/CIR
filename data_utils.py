@@ -82,58 +82,112 @@ def process_img(image_path: str, size: int) -> np.ndarray:
 class HAPPYDataset(Dataset):
     def __init__(self, dataset_name, tokenizer, split='train'):
         self.name = dataset_name
-        self.query_examples = []
-        self.index_examples = []  # 用来存储索引图像
         self.k_range = [10, 50]
 
-        # subtask = dataset_name.split("-")[1]
-        queries = []
-        for i in range(20):  # 从0到19
+        self.queries = []
+        for i in range(20):  
             file_name = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_{}.json".format(i)
-            if glob.glob(file_name):  # 检查文件是否存在
+            if glob.glob(file_name): 
                 with open(file_name) as f:
-                    queries.extend(json.load(f))
-        index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/index.json"))
-        index_image_folder = "/home/zt/data/open-images/train/data"
+                    self.queries.extend(json.load(f))
+        self.index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/index.json"))
+        self.index_image_folder = "/home/zt/data/open-images/train/data"
 
-
-        for query in queries:
-            qid = query['candidate']
-            qtext = query['captions']
-            qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
-            ima = process_img(qimage_path, 224)
-            qtokens = tokenize(qtext)
-            query_example = QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'])
-            self.query_examples.append(query_example)
-
-            target_iid = query['target']
-            index_img_path = os.path.join(index_image_folder, str(target_iid) + ".jpg")
-            index_image = process_img(index_img_path, 224)
-            index_example = IndexExample(iid=target_iid, iimage=index_image, itokens=tokenize(""))
-            self.index_examples.append(index_example)
-
-        # Store image ids instead of loading them all
-        self.index_img_ids = index_img_ids
-        self.index_image_folder = index_image_folder
+        self.query_data = []
+        for query in self.queries:
+            self.query_data.append({
+                'qid': query['candidate'],
+                'qtext':query['captions'],
+                'target_iid': query['target']
+            })
 
     def __len__(self):
-        return len(self.query_examples)
+        return len(self.query_data)
 
     def __getitem__(self, idx):
-        query_example = self.query_examples[idx]
-        target_iid = query_example.target_iid
+        query_info = self.query_data[idx]
+        qid = query_info['qid']
+        qtext = query_info['qtext']
+        target_iid = query_info['target_iid']
         
-        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".png")
-        index_image = process_img(index_img_path, 224)
+        qimage_path = os.path.join(self.index_image_folder, qid + ".jpg")
+        if not os.path.exists(qimage_path):
+            print(f"Image not found: {qimage_path}")
+            return None
+        qimage = process_img(qimage_path, 224) 
+
+        qtokens = tokenize(qtext) 
+        query_example = QueryExample(qid=qid, qtokens=qtokens, qimage=qimage, target_iid=target_iid)
+
+        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".jpg")
+        if not os.path.exists(index_img_path):
+            print(f"Index image not found: {index_img_path}")
+            return None
+        index_image = process_img(index_img_path, 224) 
 
         null_tokens = tokenize("") 
-
         index_example = IndexExample(iid=target_iid, iimage=index_image, itokens=null_tokens)
 
         return {
             'query': query_example,
             'index': index_example
         }
+
+# class HAPPYDataset(Dataset):
+#     def __init__(self, dataset_name, tokenizer, split='train'):
+#         self.name = dataset_name
+#         self.query_examples = []
+#         self.index_examples = []  # 用来存储索引图像
+#         self.k_range = [10, 50]
+
+#         # subtask = dataset_name.split("-")[1]
+        # queries = []
+        # for i in range(20):  # 从0到19
+        #     file_name = "/home/zt/data/open-images/train/processed_nn1/response_results_batch_{}.json".format(i)
+        #     if glob.glob(file_name):  # 检查文件是否存在
+        #         with open(file_name) as f:
+        #             queries.extend(json.load(f))
+        # index_img_ids = json.load(open(f"/home/zt/data/open-images/train/processed_nn1/index.json"))
+        # index_image_folder = "/home/zt/data/open-images/train/data"
+
+
+#         for query in queries:
+#             qid = query['candidate']
+#             qtext = query['captions']
+#             qimage_path = os.path.join(index_image_folder, query['candidate'] + ".jpg")
+#             ima = process_img(qimage_path, 224)
+#             qtokens = tokenize(qtext)
+#             query_example = QueryExample(qid=qid, qtokens=qtokens, qimage=ima, target_iid=query['target'])
+#             self.query_examples.append(query_example)
+
+#             target_iid = query['target']
+#             index_img_path = os.path.join(index_image_folder, str(target_iid) + ".jpg")
+#             index_image = process_img(index_img_path, 224)
+#             index_example = IndexExample(iid=target_iid, iimage=index_image, itokens=tokenize(""))
+#             self.index_examples.append(index_example)
+
+#         # Store image ids instead of loading them all
+#         self.index_img_ids = index_img_ids
+#         self.index_image_folder = index_image_folder
+
+#     def __len__(self):
+#         return len(self.query_examples)
+
+#     def __getitem__(self, idx):
+#         query_example = self.query_examples[idx]
+#         target_iid = query_example.target_iid
+        
+#         index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".png")
+#         index_image = process_img(index_img_path, 224)
+
+#         null_tokens = tokenize("") 
+
+#         index_example = IndexExample(iid=target_iid, iimage=index_image, itokens=null_tokens)
+
+#         return {
+#             'query': query_example,
+#             'index': index_example
+#         }
 
     def evaluate_recall(self):
         ret_dict = {k: [] for k in self.k_range}  
