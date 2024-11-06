@@ -50,11 +50,11 @@ def custom_collate_fn(batch):
     # 如果 tokens 的维度不统一，可以选择对其进行填充（padding），这里假设它们已经统一
     qtokens = torch.tensor(np.array(qtokens))  # 假设 tokens 是二维数组
 
-    # 如果 retrieved_iids 或 retrieved_scores 的长度不相同，你可能需要做额外的处理，比如填充
+    # 如果 retrieved_iids 或 retrieved_scores 的长度不相同，可能需要做额外的处理，比如填充
     retrieved_iid = [torch.tensor(i) for i in retrieved_iid]  # 可以选择将其转换为张量
     retrieved_scores = [torch.tensor(s) for s in retrieved_scores]  # 同样转换为张量
 
-    # 对 index 示例进行处理（这里我们只关心 image 和 tokens）
+    # 对 index 示例进行处理（这里只关心 image 和 tokens）
     iid = [i.iid for i in indexes]
     iimage = torch.stack([torch.tensor(i.iimage).float() for i in indexes])
     itokens = [i.itokens for i in indexes]
