@@ -265,8 +265,6 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError
     
-    optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
-
     model_engine, optimizer, _ , _ = deepspeed.initialize(args=cmd_args,
                                                      model=model,
                                                      model_parameters=model.parameters(),
