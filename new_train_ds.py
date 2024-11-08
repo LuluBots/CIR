@@ -98,7 +98,7 @@ def prepare_batch(batch, train_dataset):
         
         if isinstance(target_iid, list):
             target_iimages = [
-                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.png"), 224)
+                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.jpg"), 224)
                 for iid in target_iid
             ]
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
@@ -106,7 +106,7 @@ def prepare_batch(batch, train_dataset):
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
-            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.png")
+            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.jpg")
             
             timage = process_img(index_img_path, 224) 
             
@@ -194,7 +194,7 @@ def train_model(model, train_loader, criterion, args):
             if step % cmd_args.save_interval:
                 client_sd['step'] = step
                 ckpt_id = loss.item()
-                model_engine.save_checkpoint('./', ckpt_id, client_sd = client_sd, save_latest=True)
+                model_engine.save_checkpoint('./train_deeptry', ckpt_id, client_sd = client_sd, save_latest=True)
 
             total_loss += loss.item()
 
@@ -240,25 +240,29 @@ if __name__ == "__main__":
 
     if cmd_args.dataset.startswith("fiq"):
         subtask = cmd_args.dataset.split("-")[1]
-        train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
+        # train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
+        # val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
+        train_dataset, _ = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, _ = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
     elif cmd_args.dataset in ["happy"]:
-        train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
+        # train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
+        # val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
+        train_dataset, _ = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, _ = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
     else:
         raise NotImplementedError
     
-    data_iter = iter(train_loader)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
 
     model_engine, optimizer, train_loader, _ = deepspeed.initialize(args=cmd_args,
                                                      model=model,
-                                                     model_parameters=[p for p in model.parameters() if p.requires_grad](),
+                                                     model_parameters=model.parameters(),
                                                      training_data = train_dataset)
+    data_iter = iter(train_loader)
     # Get the local device name (str) and local rank (int).
     local_device = get_accelerator().device_name(model_engine.local_rank)
     local_rank = model_engine.local_rank
     
-    # optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
     # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.8)
 
 
