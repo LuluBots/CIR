@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 from CLIP.clip import tokenize
 from typing import Any, List, Union, Tuple
 import glob
+from torch.nn.utils.rnn import pad_sequence
 
 class QueryExample:
     def __init__(self, 
@@ -47,7 +48,8 @@ def custom_collate_fn(batch):
     retrieved_scores = [q.retrieved_scores for q in queries]
 
     # 如果 tokens 的维度不统一，可以选择对其进行填充（padding），这里假设它们已经统一
-    qtokens = torch.tensor(np.array(qtokens))  # 假设 tokens 是二维数组
+    # qtokens = torch.tensor(np.array(qtokens))  # 假设 tokens 是二维数组
+    qtokens = pad_sequence(qtokens, batch_first=True, padding_value=0)  # 默认填充值是0
 
     # 如果 retrieved_iids 或 retrieved_scores 的长度不相同，可能需要做额外的处理，比如填充
     retrieved_iid = [torch.tensor(i) for i in retrieved_iid]  # 可以选择将其转换为张量
@@ -241,7 +243,7 @@ class FIQDataset(Dataset):
         for query in self.queries:
             self.query_data.append({
                 'qid': query['candidate'],
-                'qtext':query['captions'],
+                'qtext': " and ".join(query['captions']),
                 'target_iid': query['target']
             })
 
@@ -324,7 +326,7 @@ class FIQDatasetVAL(Dataset):
         for query in self.queries:
             self.query_data.append({
                 'qid': query['candidate'],
-                'qtext':query['captions'],
+                'qtext': " and ".join(query['captions']),
                 'target_iid': query['target']
             })
 
