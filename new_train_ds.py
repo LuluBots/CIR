@@ -174,16 +174,21 @@ def train_model(model, train_loader, criterion, args):
         for step, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{cmd_args.epochs}")):
             qimages, qtokens, timages, ttokens = prepare_batch(batch, train_dataset)
 
+            qimages = qimages.to(device)
+            qtokens = qtokens.to(device)
+            timages = timages.to(device)
+            ttokens = ttokens.to(device)
+
             qoutput = model_engine({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"]
+            query_embeddings = qoutput["multimodal_embed_norm"].to(device)
             # print(query_embeddings.shape)
 
             qhardoutput = model_engine({"ids": ttokens, "image": qimages})
-            qhard_embeddings = qhardoutput["multimodal_embed_norm"]
+            qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
             # print(qhard_embeddings.shape)
 
             toutput = model_engine({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"]
+            target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
             # print("trian_loss: ",loss)
