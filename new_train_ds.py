@@ -168,8 +168,8 @@ def train_model(model, train_loader, criterion, args):
         num_batches = len(train_loader)
         
         #load checkpoint
-        _, client_sd = model_engine.load_checkpoint(args.load_dir, args.ckpt_id)
-        step = client_sd['step']
+        # _, client_sd = model_engine.load_checkpoint(cmd_args.load_dir, cmd_args.ckpt_id)
+        # step = client_sd['step']
 
         for step, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{cmd_args.epochs}")):
             qimages, qtokens, timages, ttokens = prepare_batch(batch, train_dataset)
@@ -192,9 +192,9 @@ def train_model(model, train_loader, criterion, args):
             model_engine.step()
 
             if step % cmd_args.save_interval:
-                client_sd['step'] = step
+                # client_sd['step'] = step
                 ckpt_id = loss.item()
-                model_engine.save_checkpoint('./train_deeptry', ckpt_id, client_sd = client_sd, save_latest=True)
+                model_engine.save_checkpoint('./train_deeptry', ckpt_id, save_latest=True)
 
             total_loss += loss.item()
 
