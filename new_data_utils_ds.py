@@ -8,7 +8,7 @@ from CLIP.clip import tokenize
 from typing import Any, List, Union, Tuple
 import glob
 from torch.nn.utils.rnn import pad_sequence
-from torch.utils.data.distributed import DistributedSampler
+# 修改jpg和png
 class QueryExample:
     def __init__(self, 
                  qid: str, 
@@ -111,7 +111,7 @@ class HAPPYDataset(Dataset):
         qtext = query_info['qtext']
         target_iid = query_info['target_iid']
         
-        qimage_path = os.path.join(self.index_image_folder, qid + ".jpg")
+        qimage_path = os.path.join(self.index_image_folder, qid + ".png")
         if not os.path.exists(qimage_path):
             print(f"Image not found: {qimage_path}")
             return None
@@ -120,7 +120,7 @@ class HAPPYDataset(Dataset):
         qtokens = tokenize(qtext) 
         query_example = QueryExample(qid=qid, qtokens=qtokens, qimage=qimage, target_iid=target_iid)
 
-        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".jpg")
+        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".png")
         if not os.path.exists(index_img_path):
             print(f"Index image not found: {index_img_path}")
             return None
@@ -223,10 +223,7 @@ class HAPPYDatasetVAL(Dataset):
 
 def build_happy_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDataset, DataLoader]:
     train_dataset = HAPPYDataset(dataset_name)
-    train_sampler = DistributedSampler(train_dataset)
-    return train_dataset, train_sampler, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, num_workers=4, collate_fn=custom_collate_fn)  
-
-    # return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    return train_dataset, DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
 def build_happy_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDatasetVAL, DataLoader]:
     val_dataset = HAPPYDatasetVAL(dataset_name)
@@ -369,10 +366,7 @@ class FIQDatasetVAL(Dataset):
 
 def build_fiq_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDataset, DataLoader]:
     train_dataset = FIQDataset(dataset_name)
-    train_sampler = DistributedSampler(train_dataset)
-    return train_dataset, train_sampler, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, num_workers=4, collate_fn=custom_collate_fn)  
-
-    # return train_dataset, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    return train_dataset, DataLoader(train_dataset,batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
 def build_fiq_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDatasetVAL, DataLoader]:
     val_dataset = FIQDatasetVAL(dataset_name)
