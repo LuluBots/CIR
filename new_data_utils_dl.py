@@ -8,7 +8,7 @@ from CLIP.clip import tokenize
 from typing import Any, List, Union, Tuple
 import glob
 from torch.nn.utils.rnn import pad_sequence
-
+from torch.utils.data.distributed import DistributedSampler
 class QueryExample:
     def __init__(self, 
                  qid: str, 
@@ -222,12 +222,15 @@ class HAPPYDatasetVAL(Dataset):
 
 
 def build_happy_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDataset, DataLoader]:
-    dataset = HAPPYDataset(dataset_name)
-    return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    train_dataset = HAPPYDataset(dataset_name)
+    train_sampler = DistributedSampler(train_dataset)
+    return train_dataset, train_sampler, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, num_workers=4, collate_fn=custom_collate_fn)  
+
+    # return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
 def build_happy_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDatasetVAL, DataLoader]:
-    dataset = HAPPYDatasetVAL(dataset_name)
-    return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    val_dataset = HAPPYDatasetVAL(dataset_name)
+    return val_dataset, DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
 
 class FIQDataset(Dataset):
@@ -366,7 +369,10 @@ class FIQDatasetVAL(Dataset):
 
 def build_fiq_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDataset, DataLoader]:
     train_dataset = FIQDataset(dataset_name)
-    return train_dataset, DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    train_sampler = DistributedSampler(train_dataset)
+    return train_dataset, train_sampler, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, num_workers=4, collate_fn=custom_collate_fn)  
+
+    # return train_dataset, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
 def build_fiq_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDatasetVAL, DataLoader]:
     val_dataset = FIQDatasetVAL(dataset_name)
