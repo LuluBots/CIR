@@ -47,7 +47,7 @@ def print_memory_usage():
         else:
             print("No GPU available.")
         
-        time.sleep(10)
+        time.sleep(60)
 
 def redirect_output_to_log(log_file):
     class LogRedirector:
@@ -153,6 +153,7 @@ def validate_model(model, val_loader, criterion):
             target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
+            print(loss)
             total_loss += loss.item()
 
     avg_loss = total_loss / num_batches
@@ -215,8 +216,8 @@ def train_model(model, train_loader, optimizer, criterion, args):
             torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
 
 if __name__ == "__main__":
-    # memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
-    # memory_thread.start()
+    memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
+    memory_thread.start()
     timestamp = int(time.time())
     timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d_%H:%M:%S')
     output_dir = f"train_{timestamp}"
