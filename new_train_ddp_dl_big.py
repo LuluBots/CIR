@@ -235,11 +235,13 @@ if __name__ == "__main__":
     parser.add_argument("--rank", type=int, default=0, help="Rank of the process.")
 
     args = parser.parse_args()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     model = MagicLens(args.model_size).to(device)
 
     if torch.cuda.device_count() > 1:
-        model = nn.DataParallel(model)
+        # model = nn.DataParallel(model)
+        model = nn.DataParallel(model, device_ids=[1, 2, 3])
+
 
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
