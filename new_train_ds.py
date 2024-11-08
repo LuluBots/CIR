@@ -242,24 +242,23 @@ if __name__ == "__main__":
 
     if cmd_args.dataset.startswith("fiq"):
         subtask = cmd_args.dataset.split("-")[1]
-        # train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
-        # val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
-        train_dataset, _ = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, _ = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
+        train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
+        # train_dataset, _ = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
+        # val_dataset, _ = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
     elif cmd_args.dataset in ["happy"]:
-        # train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
-        # val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
-        train_dataset, _ = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, _ = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
+        train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
+        # train_dataset, _ = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
+        # val_dataset, _ = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
     else:
         raise NotImplementedError
     
     optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
 
-    model_engine, optimizer, train_loader, _ = deepspeed.initialize(args=cmd_args,
+    model_engine, optimizer, _ , _ = deepspeed.initialize(args=cmd_args,
                                                      model=model,
                                                      model_parameters=model.parameters(),
-                                                     training_data = train_dataset,
                                                      config=ds_config,)
     data_iter = iter(train_loader)
     # Get the local device name (str) and local rank (int).
