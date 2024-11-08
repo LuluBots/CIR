@@ -229,6 +229,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--log-interval",type=int,default=200,help="output logging information at a given interval")
 
+    ds_config = {"wall_clock_breakdown": False}
+
     # args = parser.parse_args()
     cmd_args = parser.parse_args()
 
@@ -257,7 +259,8 @@ if __name__ == "__main__":
     model_engine, optimizer, train_loader, _ = deepspeed.initialize(args=cmd_args,
                                                      model=model,
                                                      model_parameters=model.parameters(),
-                                                     training_data = train_dataset)
+                                                     training_data = train_dataset,
+                                                     config=ds_config,)
     data_iter = iter(train_loader)
     # Get the local device name (str) and local rank (int).
     local_device = get_accelerator().device_name(model_engine.local_rank)
