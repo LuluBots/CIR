@@ -67,7 +67,7 @@ def redirect_output_to_log(log_file):
     sys.stdout = LogRedirector(log_file)
 
 def contrastive_loss(r_q, r_t, r_t_prime, tau=0.07):
-    
+    # print(r_q.shape,r_t.shape, r_t_prime.shape)
     # unsqueeze(1) (n, 1, d)  unsqueeze(0) (1, n, d)   dim=-1 在最后一维（特征维度）上计算余弦相似度 得到n*n的(r_q[i], r_t[j])
     sim_matrix = F.cosine_similarity(r_q.unsqueeze(1), r_t.unsqueeze(0), dim=-1)
     # hard_nega即“难负样本”，encode (query_image, null_token) to get r_t_prime
@@ -82,10 +82,12 @@ def contrastive_loss(r_q, r_t, r_t_prime, tau=0.07):
     part2 = torch.sum(torch.exp(hard_nega_matrix / tau), dim=1)
     denominator = part1 + part2
     loss = -torch.log(numerator / denominator)
-
+    # print(loss)
+    # print(loss.mean())
     return loss.mean()
 
 def prepare_batch(batch, train_dataset):
+    # print(batch.keys()) # dict_keys(['query', 'index'])
 
     qimages = torch.stack([qimage for qimage in batch['qimage']], dim=0)
     qtokens = torch.stack([qtokens for qtokens in batch['qtokens']], dim=0)
@@ -135,14 +137,20 @@ def validate_model(model, val_loader, criterion):
         for batch_idx, batch in enumerate(tqdm(val_loader, desc="Validation")):
             qimages, qtokens, timages, ttokens = prepare_batch(batch, val_dataset)
 
+            # 将数据移到 GPU
+            qimages = qimages.to(device)
+            qtokens = qtokens.to(device)
+            timages = timages.to(device)
+            ttokens = ttokens.to(device)
+
             qoutput = model({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"]
+            query_embeddings = qoutput["multimodal_embed_norm"].to(device)
 
             qhardoutput = model({"ids": ttokens, "image": qimages})
-            qhard_embeddings = qhardoutput["multimodal_embed_norm"]
+            qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
 
             toutput = model({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"]
+            target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
             total_loss += loss.item()
@@ -166,16 +174,25 @@ def train_model(model, train_loader, optimizer, criterion, args):
 
             qimages, qtokens, timages, ttokens = prepare_batch(batch, train_dataset)
 
+            # 将数据移到 GPU
+            qimages = qimages.to(device)
+            qtokens = qtokens.to(device)
+            timages = timages.to(device)
+            ttokens = ttokens.to(device)
+
             qoutput = model({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"]
+            query_embeddings = qoutput["multimodal_embed_norm"].to(device)
+            # print(query_embeddings.shape)
 
             qhardoutput = model({"ids": ttokens, "image": qimages})
-            qhard_embeddings = qhardoutput["multimodal_embed_norm"]
+            qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
+            # print(qhard_embeddings.shape)
 
             toutput = model({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"]
+            target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
+            # print("trian_loss: ",loss)
             loss.backward()
             optimizer.step()
 
@@ -185,6 +202,10 @@ def train_model(model, train_loader, optimizer, criterion, args):
         print(f"Epoch [{epoch + 1}/{args.epochs}], Training Loss: {avg_loss:.4f}")
 
         val_loss = validate_model(model, val_loader, criterion)
+        scheduler.step(val_loss)
+
+        for param_group in optimizer.param_groups:
+            print("Current learning rate:", param_group['lr'])
         if args.rank == 0:
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -194,8 +215,8 @@ def train_model(model, train_loader, optimizer, criterion, args):
             torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
 
 if __name__ == "__main__":
-    memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
-    memory_thread.start()
+    # memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
+    # memory_thread.start()
     timestamp = int(time.time())
     timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d_%H:%M:%S')
     output_dir = f"train_{timestamp}"
@@ -221,6 +242,7 @@ if __name__ == "__main__":
 
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.8)
     criterion = contrastive_loss
 
     if args.dataset.startswith("fiq"):
