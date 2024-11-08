@@ -196,7 +196,7 @@ def train_model(model, train_loader, criterion, args):
             model_engine.backward(loss)
             model_engine.step()
 
-            if step % cmd_args.save_interval:
+            if step % cmd_args.log_interval:
                 # client_sd['step'] = step
                 ckpt_id = loss.item()
                 model_engine.save_checkpoint('./train_deeptry', ckpt_id, save_latest=True)
@@ -230,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
     parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
-    parser.add_argument("--log-interval",type=int,default=200,help="output logging information at a given interval")
+    parser.add_argument("--log_interval",type=int,default=200,help="output logging information at a given interval")
 
     ds_config = {"train_batch_size": 100,
                  "wall_clock_breakdown": False,
