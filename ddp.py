@@ -101,7 +101,7 @@ def prepare_batch(batch, train_dataset):
         
         if isinstance(target_iid, list):
             target_iimages = [
-                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.png"), 224)
+                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.jpg"), 224)
                 for iid in target_iid
             ]
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
@@ -109,7 +109,7 @@ def prepare_batch(batch, train_dataset):
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
-            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.png")
+            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.jpg")
             
             timage = process_img(index_img_path, 224) 
             
