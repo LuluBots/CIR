@@ -230,11 +230,18 @@ if __name__ == "__main__":
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
     parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
-    parser.add_argument("--batch_size", type=int, default=100, help="Batch size for training.")
-    parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--log-interval",type=int,default=200,help="output logging information at a given interval")
 
-    ds_config = {"train_batch_size": 100 ,"wall_clock_breakdown": False}
+    ds_config = {"train_batch_size": 100,
+                 "wall_clock_breakdown": False,
+                 "optimizer": {
+                    "type": "Adam",
+                    "params": {
+                        "lr": 0.001,
+                        "betas": [0.8, 0.999],
+                        "eps": 1e-8,
+                        "weight_decay": 3e-7,
+                    }}}
 
     # args = parser.parse_args()
     cmd_args = parser.parse_args()
@@ -242,7 +249,6 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = MagicLens(cmd_args.model_size).to(device)
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
-    optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
     criterion = contrastive_loss
 
     if cmd_args.dataset.startswith("fiq"):
