@@ -229,7 +229,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
     parser.add_argument("--log-interval",type=int,default=200,help="output logging information at a given interval")
 
-    ds_config = {"wall_clock_breakdown": False}
+    ds_config = {"train_batch_size": 100 ,"wall_clock_breakdown": False}
 
     # args = parser.parse_args()
     cmd_args = parser.parse_args()
