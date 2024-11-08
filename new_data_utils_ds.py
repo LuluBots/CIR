@@ -111,7 +111,7 @@ class HAPPYDataset(Dataset):
         qtext = query_info['qtext']
         target_iid = query_info['target_iid']
         
-        qimage_path = os.path.join(self.index_image_folder, qid + ".png")
+        qimage_path = os.path.join(self.index_image_folder, qid + ".jpg")
         if not os.path.exists(qimage_path):
             print(f"Image not found: {qimage_path}")
             return None
@@ -120,7 +120,7 @@ class HAPPYDataset(Dataset):
         qtokens = tokenize(qtext) 
         query_example = QueryExample(qid=qid, qtokens=qtokens, qimage=qimage, target_iid=target_iid)
 
-        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".png")
+        index_img_path = os.path.join(self.index_image_folder, str(target_iid) + ".jpg")
         if not os.path.exists(index_img_path):
             print(f"Index image not found: {index_img_path}")
             return None
