@@ -59,7 +59,8 @@ def custom_collate_fn(batch):
     iid = [i.iid for i in indexes]
     iimage = torch.stack([torch.tensor(i.iimage).float() for i in indexes])
     itokens = [i.itokens for i in indexes]
-    itokens = torch.tensor(np.array(itokens))  # 假设它们是二维数组
+    # itokens = torch.tensor(np.array(itokens))  # 假设它们是二维数组
+    itokens = pad_sequence(itokens, batch_first=True, padding_value=0)
 
     # 返回处理后的数据
     return {
