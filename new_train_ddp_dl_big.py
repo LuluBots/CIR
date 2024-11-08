@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import time
@@ -10,7 +11,7 @@ from argparse import ArgumentParser
 import torch.nn as nn
 import os
 import threading
-
+import deepspeed
 import sys
 import time
 from datetime import datetime
@@ -24,10 +25,15 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import CLIP.clip as clip
 from CLIP.clip import tokenize
 from model import MagicLens
-from new_data_utils_dl import build_happy_dataset_for_train, build_fiq_dataset_for_train, build_fiq_dataset_for_val, build_happy_dataset_for_val
+from new_data_utils_ds import build_happy_dataset_for_train, build_fiq_dataset_for_train, build_fiq_dataset_for_val, build_happy_dataset_for_val
 import psutil
 torch.cuda.empty_cache()
 from PIL import Image
+import torchvision
+import torchvision.transforms as transforms
+from deepspeed.accelerator import get_accelerator
+from deepspeed.moe.utils import split_params_into_different_moe_groups_for_optimizer
+
 
 def process_img(image_path: str, size: int) -> np.ndarray:
         img = Image.open(image_path).convert("RGB")
@@ -47,7 +53,7 @@ def print_memory_usage():
         else:
             print("No GPU available.")
         
-        time.sleep(60)
+        time.sleep(10)
 
 def redirect_output_to_log(log_file):
     class LogRedirector:
@@ -67,23 +73,16 @@ def redirect_output_to_log(log_file):
     sys.stdout = LogRedirector(log_file)
 
 def contrastive_loss(r_q, r_t, r_t_prime, tau=0.07):
-    # print(r_q.shape,r_t.shape, r_t_prime.shape)
-    # unsqueeze(1) (n, 1, d)  unsqueeze(0) (1, n, d)   dim=-1 在最后一维（特征维度）上计算余弦相似度 得到n*n的(r_q[i], r_t[j])
     sim_matrix = F.cosine_similarity(r_q.unsqueeze(1), r_t.unsqueeze(0), dim=-1)
-    # hard_nega即“难负样本”，encode (query_image, null_token) to get r_t_prime
     hard_nega_matrix = F.cosine_similarity(r_q.unsqueeze(1), r_t_prime.unsqueeze(0), dim=-1)
 
-    # 返回包含矩阵主对角线元素的一维张量，r_q[i] 和 r_t[j] 之间的余弦相似度
     sim_diag = torch.diagonal(sim_matrix)
     numerator = torch.exp(sim_diag / tau)
    
-    # dim=1即按行求和
     part1 = torch.sum(torch.exp(sim_matrix / tau), dim=1)
     part2 = torch.sum(torch.exp(hard_nega_matrix / tau), dim=1)
     denominator = part1 + part2
     loss = -torch.log(numerator / denominator)
-    # print(loss)
-    # print(loss.mean())
     return loss.mean()
 
 def prepare_batch(batch, train_dataset):
@@ -99,7 +98,7 @@ def prepare_batch(batch, train_dataset):
         
         if isinstance(target_iid, list):
             target_iimages = [
-                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.jpg"), 224)
+                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.png"), 224)
                 for iid in target_iid
             ]
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
@@ -107,7 +106,7 @@ def prepare_batch(batch, train_dataset):
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
-            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.jpg")
+            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.png")
             
             timage = process_img(index_img_path, 224) 
             
@@ -127,97 +126,89 @@ def prepare_batch(batch, train_dataset):
 
     return qimages, qtokens, timages, ttokens
 
-def validate_model(model, val_loader, criterion):
-    model.eval().float()
+# def validate_model(model, val_loader, criterion):
+#     model.eval().float()
 
-    total_loss = 0.0
-    num_batches = len(val_loader)
+#     total_loss = 0.0
+#     num_batches = len(val_loader)
     
-    with torch.no_grad(): 
-        for batch_idx, batch in enumerate(tqdm(val_loader, desc="Validation")):
-            qimages, qtokens, timages, ttokens = prepare_batch(batch, val_dataset)
+#     with torch.no_grad(): 
+#         for batch_idx, batch in enumerate(tqdm(val_loader, desc="Validation")):
+#             qimages, qtokens, timages, ttokens = prepare_batch(batch, val_dataset)
 
-            # 将数据移到 GPU
-            qimages = qimages.to(device)
-            qtokens = qtokens.to(device)
-            timages = timages.to(device)
-            ttokens = ttokens.to(device)
+#             # 将数据移到 GPU
+#             qimages = qimages.to(device)
+#             qtokens = qtokens.to(device)
+#             timages = timages.to(device)
+#             ttokens = ttokens.to(device)
 
-            qoutput = model({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"].to(device)
+#             qoutput = model({"ids": qtokens, "image": qimages})
+#             query_embeddings = qoutput["multimodal_embed_norm"].to(device)
 
-            qhardoutput = model({"ids": ttokens, "image": qimages})
-            qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
+#             qhardoutput = model({"ids": ttokens, "image": qimages})
+#             qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
 
-            toutput = model({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"].to(device)
+#             toutput = model({"ids": ttokens, "image": timages})
+#             target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
-            loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
-            print(loss)
-            total_loss += loss.item()
+#             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
+#             print(loss)
+#             total_loss += loss.item()
 
-    avg_loss = total_loss / num_batches
-    print(f"Validation Loss: {avg_loss:.4f}")
+#     avg_loss = total_loss / num_batches
+#     print(f"Validation Loss: {avg_loss:.4f}")
     
-    return avg_loss
+#     return avg_loss
 
-def train_model(model, train_loader, optimizer, criterion, args):
+def train_model(model, train_loader, criterion, args):
     model.train().float()
-    best_val_loss = float('inf')
 
     for epoch in range(args.epochs):
         total_loss = 0.0
         num_batches = len(train_loader)
         
-        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{args.epochs}")):
+        #load checkpoint
+        _, client_sd = model_engine.load_checkpoint(args.load_dir, args.ckpt_id)
+        step = client_sd['step']
 
-            optimizer.zero_grad()
-
+        for step, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{cmd_args.epochs}")):
             qimages, qtokens, timages, ttokens = prepare_batch(batch, train_dataset)
 
-            # 将数据移到 GPU
-            qimages = qimages.to(device)
-            qtokens = qtokens.to(device)
-            timages = timages.to(device)
-            ttokens = ttokens.to(device)
-
-            qoutput = model({"ids": qtokens, "image": qimages})
-            query_embeddings = qoutput["multimodal_embed_norm"].to(device)
+            qoutput = model_engine({"ids": qtokens, "image": qimages})
+            query_embeddings = qoutput["multimodal_embed_norm"]
             # print(query_embeddings.shape)
 
-            qhardoutput = model({"ids": ttokens, "image": qimages})
-            qhard_embeddings = qhardoutput["multimodal_embed_norm"].to(device)
+            qhardoutput = model_engine({"ids": ttokens, "image": qimages})
+            qhard_embeddings = qhardoutput["multimodal_embed_norm"]
             # print(qhard_embeddings.shape)
 
-            toutput = model({"ids": ttokens, "image": timages})
-            target_embeddings = toutput["multimodal_embed_norm"].to(device)
+            toutput = model_engine({"ids": ttokens, "image": timages})
+            target_embeddings = toutput["multimodal_embed_norm"]
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
             # print("trian_loss: ",loss)
-            loss.backward()
-            optimizer.step()
+
+            model_engine.backward(loss)
+            model_engine.step()
+
+            if step % cmd_args.save_interval:
+                client_sd['step'] = step
+                ckpt_id = loss.item()
+                model_engine.save_checkpoint('./', ckpt_id, client_sd = client_sd, save_latest=True)
 
             total_loss += loss.item()
 
         avg_loss = total_loss / num_batches
         print(f"Epoch [{epoch + 1}/{args.epochs}], Training Loss: {avg_loss:.4f}")
 
-        val_loss = validate_model(model, val_loader, criterion)
-        scheduler.step(val_loss)
-
-        for param_group in optimizer.param_groups:
-            print("Current learning rate:", param_group['lr'])
-        if args.rank == 0:
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                torch.save(model.state_dict(), os.path.join(output_dir, 'best_model_weights.pth'))
-                print(f"Best model weights saved for epoch {epoch + 1}.")
-
-            torch.save(model.state_dict(), os.path.join(output_dir, f'model_weights_epoch_{epoch + 1}.pth'))
-
 if __name__ == "__main__":
-    memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
-    memory_thread.start()
+
+    deepspeed.init_distributed()
+    _local_rank = int(os.environ.get("LOCAL_RANK"))
+    get_accelerator().set_device(_local_rank)
+
+    # memory_thread = threading.Thread(target=print_memory_usage, daemon=True)
+    # memory_thread.start()
     timestamp = int(time.time())
     timestamp = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d_%H:%M:%S')
     output_dir = f"train_{timestamp}"
@@ -226,42 +217,52 @@ if __name__ == "__main__":
     log_file = os.path.join(output_dir, f"train_{timestamp}.log")
     redirect_output_to_log(log_file)
 
-    parser = ArgumentParser()
+    parser = ArgumentParser(description='My training script.')
+    parser.add_argument('--local_rank', type=int, default=-1, help='local rank passed from distributed launcher')
+    # Include DeepSpeed configuration arguments
+    parser = deepspeed.add_config_arguments(parser)
+
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
     parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
     parser.add_argument("--batch_size", type=int, default=100, help="Batch size for training.")
     parser.add_argument("--lr", type=float, default=0.0001, help="Learning rate.")
-    parser.add_argument("--rank", type=int, default=0, help="Rank of the process.")
+    parser.add_argument("--log-interval",type=int,default=200,help="output logging information at a given interval")
 
-    args = parser.parse_args()
-    device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
-    model = MagicLens(args.model_size).to(device)
+    # args = parser.parse_args()
+    cmd_args = parser.parse_args()
 
-    if torch.cuda.device_count() > 1:
-        # model = nn.DataParallel(model)
-        model = nn.DataParallel(model, device_ids=[2, 3])
-
-
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = MagicLens(cmd_args.model_size).to(device)
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.8)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
     criterion = contrastive_loss
 
-    if args.dataset.startswith("fiq"):
-        subtask = args.dataset.split("-")[1]
-        train_dataset, train_loader= build_fiq_dataset_for_train(dataset_name=args.dataset)
-        val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=args.dataset)
-    # elif args.dataset in ["circo"]:
-        # train_dataset = build_circo_dataset_for_train(dataset_name=args.dataset, tokenizer=tokenizer)
-        # val_dataset = build_circo_dataset(dataset_name=args.dataset, tokenizer=tokenizer)
-    elif args.dataset in ["happy"]:
-        train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=args.dataset)
-        val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=args.dataset)
+    if cmd_args.dataset.startswith("fiq"):
+        subtask = cmd_args.dataset.split("-")[1]
+        train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
+    elif cmd_args.dataset in ["happy"]:
+        train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
+        val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
     else:
         raise NotImplementedError
+    
+    data_iter = iter(train_loader)
 
-    train_model(model, train_loader, optimizer, criterion, args)
+    model_engine, optimizer, train_loader, _ = deepspeed.initialize(args=cmd_args,
+                                                     model=model,
+                                                     model_parameters=[p for p in model.parameters() if p.requires_grad](),
+                                                     training_data = train_dataset)
+    # Get the local device name (str) and local rank (int).
+    local_device = get_accelerator().device_name(model_engine.local_rank)
+    local_rank = model_engine.local_rank
+    
+    # optimizer = torch.optim.Adam(model.parameters(), lr=cmd_args.lr)
+    # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.8)
+
+
+    train_model(model, train_loader, criterion, cmd_args)
 
     print("Training Done.")
 
