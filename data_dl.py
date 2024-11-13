@@ -8,7 +8,7 @@ from CLIP.clip import tokenize
 from typing import Any, List, Union, Tuple
 import glob
 from torch.nn.utils.rnn import pad_sequence
-# 修改jpg和png
+
 class QueryExample:
     def __init__(self, 
                  qid: str, 
