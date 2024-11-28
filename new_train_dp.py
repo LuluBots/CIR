@@ -153,7 +153,7 @@ def validate_model(model, val_loader, criterion):
             target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
-            print(loss)
+            # print(loss)
             total_loss += loss.item()
 
     avg_loss = total_loss / num_batches
@@ -193,7 +193,7 @@ def train_model(model, train_loader, optimizer, criterion, args):
             target_embeddings = toutput["multimodal_embed_norm"].to(device)
 
             loss = criterion(query_embeddings, target_embeddings, qhard_embeddings)
-            print(loss)
+            # print(loss)
             # print("trian_loss: ",loss)
             loss.backward()
             optimizer.step()
