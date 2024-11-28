@@ -13,7 +13,6 @@ from model import MagicLens
 from tqdm import tqdm
 import CLIP.clip as clip
 
-
 def load_model(model_size: str) -> torch.nn.Module:
     model = MagicLens(model_size)
     model.eval()
