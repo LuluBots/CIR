@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import os
+# os.environ['TORCH_CUDA_ARCH_LIST']
 import sys
 import time
 from datetime import datetime
 import torch
 import torch.nn as nn
+from torch.nn.utils.rnn import pad_sequence
+
 import torch.nn.functional as F
 from tqdm import tqdm
 from argparse import ArgumentParser
@@ -25,15 +28,15 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import CLIP.clip as clip
 from CLIP.clip import tokenize
 from model import MagicLens
-from new_data_utils_ds import build_happy_dataset_for_train, build_fiq_dataset_for_train, build_fiq_dataset_for_val, build_happy_dataset_for_val
+from new_data_utils_ds import build_happy_dataset_for_train, build_fiq_dataset_for_train, build_happy_dataset_for_val
 import psutil
 torch.cuda.empty_cache()
 from PIL import Image
 import torchvision
 import torchvision.transforms as transforms
 from deepspeed.accelerator import get_accelerator
-from deepspeed.moe.utils import split_params_into_different_moe_groups_for_optimizer
-
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 def process_img(image_path: str, size: int) -> np.ndarray:
         img = Image.open(image_path).convert("RGB")
@@ -72,6 +75,50 @@ def redirect_output_to_log(log_file):
 
     sys.stdout = LogRedirector(log_file)
 
+
+def custom_collate_fn(batch):
+    # batch 是包含多个样本的列表，每个样本是一个字典，包含 'query' 和 'index'
+    queries = [sample['query'] for sample in batch]
+    indexes = [sample['index'] for sample in batch]
+
+    # 获取 query 中所有字段
+    qid = [q.qid for q in queries]
+    # print(type(q.qimage)for q in queries)
+    qimage = torch.stack([torch.tensor(q.qimage).float() for q in queries])  # 将图像转换为张量
+    qtokens = [q.qtokens for q in queries]  # tokens 通常是 numpy 数组或列表，确保它们是相同大小
+    target_iid = [q.target_iid for q in queries]
+    retrieved_iid = [q.retrieved_iids for q in queries]
+    retrieved_scores = [q.retrieved_scores for q in queries]
+
+    # 如果 tokens 的维度不统一，可以选择对其进行填充（padding），这里假设它们已经统一
+    # qtokens = torch.tensor(np.array(qtokens))  # 假设 tokens 是二维数组
+    qtokens = pad_sequence(qtokens, batch_first=True, padding_value=0)  # 默认填充值是0
+
+    # 如果 retrieved_iids 或 retrieved_scores 的长度不相同，可能需要做额外的处理，比如填充
+    retrieved_iid = [torch.tensor(i) for i in retrieved_iid]  # 可以选择将其转换为张量
+    retrieved_scores = [torch.tensor(s) for s in retrieved_scores]  # 同样转换为张量
+
+    # 对 index 示例进行处理（这里我们只关心 image 和 tokens）
+    iid = [i.iid for i in indexes]
+    iimage = torch.stack([torch.tensor(i.iimage).float() for i in indexes])
+    itokens = [i.itokens for i in indexes]
+    # itokens = torch.tensor(np.array(itokens))  # 假设它们是二维数组
+    itokens = pad_sequence(itokens, batch_first=True, padding_value=0)
+
+    # 返回处理后的数据
+    return {
+        'qid': qid,
+        'qimage': qimage,
+        'qtokens': qtokens,
+        'target_iid': target_iid,
+        'retrieved_iid': retrieved_iid,
+        'retrieved_scores': retrieved_scores,
+        'iid': iid,
+        'iimage': iimage,
+        'itokens': itokens
+    }
+
+
 def contrastive_loss(r_q, r_t, r_t_prime, tau=0.07):
     sim_matrix = F.cosine_similarity(r_q.unsqueeze(1), r_t.unsqueeze(0), dim=-1)
     hard_nega_matrix = F.cosine_similarity(r_q.unsqueeze(1), r_t_prime.unsqueeze(0), dim=-1)
@@ -86,7 +133,6 @@ def contrastive_loss(r_q, r_t, r_t_prime, tau=0.07):
     return loss.mean()
 
 def prepare_batch(batch, train_dataset):
-    # print(batch.keys()) # dict_keys(['query', 'index'])
 
     qimages = torch.stack([qimage for qimage in batch['qimage']], dim=0)
     qtokens = torch.stack([qtokens for qtokens in batch['qtokens']], dim=0)
@@ -98,7 +144,7 @@ def prepare_batch(batch, train_dataset):
         
         if isinstance(target_iid, list):
             target_iimages = [
-                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.jpg"), 224)
+                process_img(os.path.join(train_dataset.index_image_folder, f"{iid}.png"), 224)
                 for iid in target_iid
             ]
             timages.append(torch.cat([torch.tensor(img) for img in target_iimages if img is not None]))
@@ -106,7 +152,7 @@ def prepare_batch(batch, train_dataset):
             target_tokens = np.array(tokenize("")).astype(np.float32)
             ttokens_list.append(torch.tensor(target_tokens))
         else:
-            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.jpg")
+            index_img_path = os.path.join(train_dataset.index_image_folder, f"{target_iid}.png")
             
             timage = process_img(index_img_path, 224) 
             
@@ -167,11 +213,12 @@ def train_model(model, train_loader, criterion, args):
         total_loss = 0.0
         num_batches = len(train_loader)
         
+        
         #load checkpoint
-        # _, client_sd = model_engine.load_checkpoint(cmd_args.load_dir, cmd_args.ckpt_id)
+        # _, client_sd = model_engine.load_checkpoint(args.load_dir, args.ckpt_id)
         # step = client_sd['step']
 
-        for step, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{cmd_args.epochs}")):
+        for step, batch in enumerate(tqdm(train_loader, desc=f"Training Epoch {epoch + 1}/{args.epochs}")):
             qimages, qtokens, timages, ttokens = prepare_batch(batch, train_dataset)
 
             qimages = qimages.to(device)
@@ -196,10 +243,10 @@ def train_model(model, train_loader, criterion, args):
             model_engine.backward(loss)
             model_engine.step()
 
-            if step % cmd_args.log_interval:
-                # client_sd['step'] = step
-                ckpt_id = loss.item()
-                model_engine.save_checkpoint('./train_deeptry', ckpt_id, save_latest=True)
+            # if step % args.log_interval:
+            #     # client_sd['step'] = step
+            #     ckpt_id = loss.item()
+            #     model_engine.save_checkpoint('./train_deeptry', step, save_latest=True)
 
             total_loss += loss.item()
 
@@ -223,61 +270,57 @@ if __name__ == "__main__":
     redirect_output_to_log(log_file)
 
     parser = ArgumentParser(description='My training script.')
-    parser.add_argument('--local_rank', type=int, default=-1, help='local rank passed from distributed launcher')
-    # Include DeepSpeed configuration arguments
     parser = deepspeed.add_config_arguments(parser)
-
+    parser.add_argument('--local_rank', type=int, default=-1, help='local rank passed from distributed launcher')
     parser.add_argument("--model_size", type=str, default="base", choices=["base", "large"], help="Model size.")
-    parser.add_argument("--dataset", type=str, default="happy", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
+    parser.add_argument("--dataset", type=str, default="fiq-dress", choices=["fiq-dress", "fiq-shirt", "fiq-toptee", "circo", "dtin", "happy"], help="Dataset selection.")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs.")
-    parser.add_argument("--log_interval",type=int,default=200,help="output logging information at a given interval")
+    # parser.add_argument("--bacth_size", type=int, default=100)
+    parser.add_argument("--log_interval",type=int,default=2000, help="output logging information at a given interval")
+    args = parser.parse_args()
 
-    ds_config = {"train_batch_size": 100,
-                 "wall_clock_breakdown": False,
-                 "optimizer": {
-                    "type": "Adam",
-                    "params": {
-                        "lr": 0.001,
-                        "betas": [0.8, 0.999],
-                        "eps": 1e-8,
-                        "weight_decay": 3e-7,
-                    }}}
+    ds_config = {
+                # "train_batch_size": args.batch_size,
+                "train_micro_batch_size_per_gpu":200,
+                "wall_clock_breakdown": False,
+                "optimizer": {
+                "type": "Adam",
+                "params": {
+                    "lr": 0.001,
+                    "betas": [0.8, 0.999],
+                    "eps": 1e-8,
+                    "weight_decay": 3e-7,
+                }}}
 
-    # args = parser.parse_args()
-    cmd_args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = MagicLens(cmd_args.model_size).to(device)
+    model = MagicLens(args.model_size).to(device)
     tokenizer = clip.simple_tokenizer.SimpleTokenizer()
     criterion = contrastive_loss
 
-    if cmd_args.dataset.startswith("fiq"):
-        subtask = cmd_args.dataset.split("-")[1]
-        train_dataset, train_loader = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, val_loader = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
-        # train_dataset, _ = build_fiq_dataset_for_train(dataset_name=cmd_args.dataset)
-        # val_dataset, _ = build_fiq_dataset_for_val(dataset_name=cmd_args.dataset)
-    elif cmd_args.dataset in ["happy"]:
-        train_dataset, train_loader = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
-        val_dataset, val_loader = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
-        # train_dataset, _ = build_happy_dataset_for_train(dataset_name=cmd_args.dataset)
-        # val_dataset, _ = build_happy_dataset_for_val(dataset_name=cmd_args.dataset)
+    if args.dataset.startswith("fiq"):
+        subtask = args.dataset.split("-")[1]
+        train_dataset = build_fiq_dataset_for_train(dataset_name=args.dataset)
+        train_loader = DataLoader(train_dataset, sampler = DistributedSampler(train_dataset, shuffle=True), num_workers=4, collate_fn=custom_collate_fn)  
+    # elif args.dataset in ["happy"]:
+    #     train_dataset = build_happy_dataset_for_train(dataset_name=args.dataset)
+    #     val_dataset = build_happy_dataset_for_val(dataset_name=args.dataset)
     else:
         raise NotImplementedError
     
-    model_engine, optimizer, _ , _ = deepspeed.initialize(args=cmd_args,
+
+    # data_iter = iter(train_loader)
+
+    model_engine, optimizer, _ , _ = deepspeed.initialize(args=args,
                                                      model=model,
                                                      model_parameters=model.parameters(),
-                                                     config=ds_config,)
-    data_iter = iter(train_loader)
+                                                     config=ds_config)
+    
     # Get the local device name (str) and local rank (int).
     local_device = get_accelerator().device_name(model_engine.local_rank)
     local_rank = model_engine.local_rank
-    
-    # scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.8)
 
-
-    train_model(model, train_loader, criterion, cmd_args)
+    train_model(model, train_loader, criterion, args)
 
     print("Training Done.")
 
