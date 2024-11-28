@@ -222,14 +222,14 @@ class HAPPYDatasetVAL(Dataset):
         }
 
 
-def build_happy_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDataset, DataLoader]:
+def build_happy_dataset_for_train(dataset_name: str, batch_size: int = 10) -> Tuple[HAPPYDataset, DataLoader]:
     train_dataset = HAPPYDataset(dataset_name)
     train_sampler = DistributedSampler(train_dataset)
     return train_dataset, DataLoader(train_dataset, sampler=train_sampler, batch_size=batch_size, num_workers=4, collate_fn=custom_collate_fn)  
 
     # return dataset, DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
-def build_happy_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[HAPPYDatasetVAL, DataLoader]:
+def build_happy_dataset_for_val(dataset_name: str, batch_size: int = 10) -> Tuple[HAPPYDatasetVAL, DataLoader]:
     val_dataset = HAPPYDatasetVAL(dataset_name)
     return val_dataset, DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
 
