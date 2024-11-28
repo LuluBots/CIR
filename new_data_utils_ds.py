@@ -35,48 +35,6 @@ class IndexExample:
         self.iimage = iimage
         self.itokens = itokens
 
-def custom_collate_fn(batch):
-    # batch 是包含多个样本的列表，每个样本是一个字典，包含 'query' 和 'index'
-    queries = [sample['query'] for sample in batch]
-    indexes = [sample['index'] for sample in batch]
-
-    # 获取 query 中所有字段
-    qid = [q.qid for q in queries]
-    # print(type(q.qimage)for q in queries)
-    qimage = torch.stack([torch.tensor(q.qimage).float() for q in queries])  # 将图像转换为张量
-    qtokens = [q.qtokens for q in queries]  # tokens 通常是 numpy 数组或列表，确保它们是相同大小
-    target_iid = [q.target_iid for q in queries]
-    retrieved_iid = [q.retrieved_iids for q in queries]
-    retrieved_scores = [q.retrieved_scores for q in queries]
-
-    # 如果 tokens 的维度不统一，可以选择对其进行填充（padding），这里假设它们已经统一
-    # qtokens = torch.tensor(np.array(qtokens))  # 假设 tokens 是二维数组
-    qtokens = pad_sequence(qtokens, batch_first=True, padding_value=0)  # 默认填充值是0
-
-    # 如果 retrieved_iids 或 retrieved_scores 的长度不相同，可能需要做额外的处理，比如填充
-    retrieved_iid = [torch.tensor(i) for i in retrieved_iid]  # 可以选择将其转换为张量
-    retrieved_scores = [torch.tensor(s) for s in retrieved_scores]  # 同样转换为张量
-
-    # 对 index 示例进行处理（这里我们只关心 image 和 tokens）
-    iid = [i.iid for i in indexes]
-    iimage = torch.stack([torch.tensor(i.iimage).float() for i in indexes])
-    itokens = [i.itokens for i in indexes]
-    # itokens = torch.tensor(np.array(itokens))  # 假设它们是二维数组
-    itokens = pad_sequence(itokens, batch_first=True, padding_value=0)
-
-    # 返回处理后的数据
-    return {
-        'qid': qid,
-        'qimage': qimage,
-        'qtokens': qtokens,
-        'target_iid': target_iid,
-        'retrieved_iid': retrieved_iid,
-        'retrieved_scores': retrieved_scores,
-        'iid': iid,
-        'iimage': iimage,
-        'itokens': itokens
-    }
-
 def process_img(image_path: str, size: int) -> np.ndarray:
         img = Image.open(image_path).convert("RGB")
         img = img.resize((size, size), Image.BILINEAR)
@@ -366,10 +324,6 @@ class FIQDatasetVAL(Dataset):
         }
 
 
-def build_fiq_dataset_for_train(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDataset, DataLoader]:
+def build_fiq_dataset_for_train(dataset_name: str) -> Tuple[FIQDataset, DataLoader]:
     train_dataset = FIQDataset(dataset_name)
-    return train_dataset, DataLoader(train_dataset,batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
-
-def build_fiq_dataset_for_val(dataset_name: str, batch_size: int = 100) -> Tuple[FIQDatasetVAL, DataLoader]:
-    val_dataset = FIQDatasetVAL(dataset_name)
-    return val_dataset, DataLoader(val_dataset, batch_size=batch_size, shuffle=True, num_workers=4, collate_fn=custom_collate_fn)  
+    return train_dataset
