@@ -36,6 +36,15 @@ These scripts are available in different versions, indicated by the following su
 - **`dp`**: Accelerated by DataParallel  
 - **`ddp`**: Accelerated by DistributedDataParallel  
 
+### Running DDP Mode
+
+To run scripts in **DDP mode**, execute commands like `train_ddp.sh` in the terminal.  
+
+### Example Output
+
+The output of the script will be similar to `retrieval_results.json`.  
+
+
 
 主目录下应同时有layers.py, model.py, data_utils.py, 和 train.py 四个脚本。
 
