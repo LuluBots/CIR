@@ -21,8 +21,23 @@ change the CLIP class in file CLIP/clip.py like this:
 
 Please follow instructions: https://github.com/google-deepmind/magiclens/tree/main/data
 
-## File Explanation
+## File Structure
+
+The main directory should contain the following scripts:  
+- `layers.py`  
+- `model.py`  
+- `data_utils.py`  
+- `train.py`  
+
+### Multiple Versions of `data_utils.py` and `train.py`
+
+These scripts are available in different versions, indicated by the following suffixes:  
+- **`ds`**: Accelerated by DeepSeed  
+- **`dp`**: Accelerated by DataParallel  
+- **`ddp`**: Accelerated by DistributedDataParallel  
+
 
 主目录下应同时有layers.py, model.py, data_utils.py, 和 train.py 四个脚本。
-其中 data_utils 和 train 有多个版本。后缀ds表示采用
+
+其中 data_utils 和 train 有多个对应版本。后缀ds表示采用deepseed加速，dp表示采用DataParallel加速，ddp表示采用DistributeDataParallel加速。
 
