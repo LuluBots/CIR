@@ -21,3 +21,8 @@ change the CLIP class in file CLIP/clip.py like this:
 
 Please follow instructions: https://github.com/google-deepmind/magiclens/tree/main/data
 
+## File Explanation
+
+主目录下应同时有layers.py, model.py, data_utils.py, 和 train.py 四个脚本。
+其中 data_utils 和 train 有多个版本。后缀ds表示采用
+
